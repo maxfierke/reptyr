@@ -27,6 +27,10 @@
 #include <sys/user.h>
 #include <unistd.h>
 
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
+
 /*
  * See https://github.com/nelhage/reptyr/issues/25 and
  * https://github.com/nelhage/reptyr/issues/26.
@@ -67,6 +71,9 @@ struct ptrace_child {
 #endif
 #ifdef __FreeBSD__
 	struct reg regs;
+#endif
+#ifdef __APPLE__
+    thread_state_t thread_state;
 #endif
 };
 

@@ -4,6 +4,9 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
 	OBJS += platform/linux/linux_ptrace.o platform/linux/linux.o
 endif
+ifeq ($(UNAME_S),Darwin)
+	OBJS += platform/darwin/darwin_ptrace.o platform/darwin/darwin.o
+endif
 ifeq ($(UNAME_S),FreeBSD)
 	OBJS += platform/freebsd/freebsd_ptrace.o platform/freebsd/freebsd.o
 	LDFLAGS += -lprocstat
