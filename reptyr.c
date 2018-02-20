@@ -36,7 +36,7 @@
 #include "reallocarray.h"
 #include "platform/platform.h"
 
-static int verbose = 0;
+static int verbose = 1;
 
 void _debug(const char *pfx, const char *msg, va_list ap) {
 

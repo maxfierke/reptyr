@@ -45,24 +45,6 @@
 #include "reallocarray.h"
 #include "platform/platform.h"
 
-int fd_array_push(struct fd_array *fda, int fd) {
-    int *tmp;
-
-    if (fda->n == fda->allocated) {
-        fda->allocated = fda->allocated ? 2 * fda->allocated : 2;
-        tmp = xreallocarray(fda->fds, fda->allocated, sizeof *tmp);
-        if (tmp == NULL) {
-            free(fda->fds);
-            fda->fds = NULL;
-            fda->allocated = 0;
-            return -1;
-        }
-        fda->fds = tmp;
-    }
-    fda->fds[fda->n++] = fd;
-    return 0;
-}
-
 static void do_unmap(struct ptrace_child *child, child_addr_t addr, unsigned long len) {
     if (addr == (child_addr_t) - 1)
         return;

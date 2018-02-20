@@ -36,7 +36,7 @@ struct fd_array {
     int n;
     int allocated;
 };
-int fd_array_push(struct fd_array *fda, int fd);
+extern int fd_array_push(struct fd_array *fda, int fd);
 
 #define do_syscall(child, name, a0, a1, a2, a3, a4, a5) \
     ptrace_remote_syscall((child), ptrace_syscall_numbers((child))->nr_##name, \
