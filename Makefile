@@ -1,5 +1,8 @@
 override CFLAGS := -Wall -Werror -D_GNU_SOURCE -g $(CFLAGS)
-OBJS=reptyr.o reallocarray.o attach.o
+# TODO: Rust bundles libraries that depend on these
+override LDFLAGS := -lpthread -ldl
+OBJS=reptyr.o attach.o
+REPTYER_RUST_LIB := target/release/libptyr.a
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
 	OBJS += platform/linux/linux_ptrace.o platform/linux/linux.o
@@ -20,7 +23,7 @@ PKG_CONFIG ?= pkg-config
 
 all: reptyr
 
-reptyr: $(OBJS)
+reptyr: $(OBJS) $(REPTYER_RUST_LIB)
 
 ifeq ($(DISABLE_TESTS),)
 test: reptyr test/victim PHONY
@@ -36,11 +39,12 @@ test/victim: test/victim.o
 test/victim: override CFLAGS := $(VICTIM_CFLAGS)
 test/victim: override LDFLAGS := $(VICTIM_LDFLAGS)
 
-attach.o: reptyr.h ptrace.h
+attach.o: reptyr.h ptrace.h reallocarray.h
 reptyr.o: reptyr.h reallocarray.h
 ptrace.o: ptrace.h platform/platform.h $(wildcard platform/*/arch/*.h)
 
 clean:
+	cargo clean
 	rm -f reptyr $(OBJS) test/victim.o test/victim
 
 BASHCOMPDIR ?= $(shell $(PKG_CONFIG) --variable=completionsdir bash-completion 2>/dev/null)
@@ -57,4 +61,6 @@ install: reptyr
 	install -d -m 755 $(DESTDIR)$$bashcompdir ; \
 	install -m 644 reptyr.bash $(DESTDIR)$$bashcompdir/reptyr
 
-.PHONY: PHONY
+.PHONY: PHONY target/release/libptyr.a
+target/release/libptyr.a:
+	cargo build --verbose --release

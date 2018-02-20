@@ -2,3 +2,7 @@ reptyr
 ptrace
 *.o
 /.vagrant/
+
+/target/
+**/*.rs.bk
+Cargo.lock

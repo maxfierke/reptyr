@@ -1,0 +1,11 @@
+[package]
+name = "ptyr"
+version = "0.1.0"
+authors = ["Max Fierke <max@maxfierke.com>"]
+
+[dependencies]
+errno = "*"
+libc = "*"
+
+[lib]
+crate-type = ["staticlib"]
