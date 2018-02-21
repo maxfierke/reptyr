@@ -1,16 +1,73 @@
 extern crate libc;
 
-use libc::{c_int, c_void, free};
+use libc::{
+  c_char,
+  c_int,
+  c_ulong,
+  c_void,
+  dev_t,
+  free,
+  PATH_MAX,
+  pid_t,
+  sockaddr,
+  sockaddr_un,
+  uid_t
+};
 use std::mem::{size_of};
 use std::ptr;
 
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub use self::linux::*;
+
+use ptrace::{ptrace_child};
 use xreallocarray;
+
+const TASK_COMM_LENGTH: usize = 16;
 
 #[repr(C)]
 pub struct fd_array {
     fds: *mut c_int,
     n: c_int,
     allocated: c_int
+}
+
+#[repr(C)]
+pub struct proc_stat {
+    pid: pid_t,
+    comm: [c_char; TASK_COMM_LENGTH+1],
+    state: c_char,
+    ppid: pid_t,
+    sid: pid_t,
+    pgid: pid_t,
+    ctty: dev_t
+}
+
+#[repr(C)]
+union SockAddrUnion {
+  addr: sockaddr,
+  addr_un: sockaddr_un
+}
+
+#[repr(C)]
+pub struct steal_pty_state {
+    target_stat: proc_stat,
+
+    emulator_pid: pid_t,
+    emulator_uid: uid_t,
+
+    master_fds: fd_array,
+
+    tmpdir: [c_char; PATH_MAX as usize],
+    sa: SockAddrUnion,
+    sockfd: c_int,
+
+    child: ptrace_child,
+    child_scratch: c_ulong,
+    child_fd: c_int,
+
+    ptyfd: c_int
 }
 
 #[no_mangle]

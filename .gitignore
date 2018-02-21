@@ -1,5 +1,6 @@
 reptyr
 ptrace
+!src/ptrace
 *.o
 /.vagrant/
 

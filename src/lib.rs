@@ -2,6 +2,7 @@ extern crate errno;
 extern crate libc;
 
 pub mod platform;
+pub mod ptrace;
 
 use errno::{Errno, set_errno};
 use libc::{c_void, ENOMEM, realloc, size_t};
