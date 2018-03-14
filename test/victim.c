@@ -1,5 +1,8 @@
 #include <stdio.h>
+
+#ifdef PR_SET_PTRACER
 #include <sys/prctl.h>
+#endif
 
 int main(int argc, char **argv) {
     char *line = NULL;

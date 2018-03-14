@@ -6,6 +6,10 @@ ifeq ($(UNAME_S),Linux)
 endif
 ifeq ($(UNAME_S),Darwin)
 	OBJS += platform/darwin/darwin_ptrace.o platform/darwin/darwin.o
+	override LDFLAGS := -sectcreate __TEXT __info_plist platform/darwin/Info.plist \
+		-framework Security \
+		-framework Foundation \
+		$(LDFLAGS)
 endif
 ifeq ($(UNAME_S),FreeBSD)
 	OBJS += platform/freebsd/freebsd_ptrace.o platform/freebsd/freebsd.o
@@ -21,7 +25,11 @@ MANDIR=$(PREFIX)/share/man
 
 PKG_CONFIG ?= pkg-config
 
+ifeq ($(UNAME_S),Darwin)
+all: reptyr codesign
+else
 all: reptyr
+endif
 
 reptyr: $(OBJS)
 
@@ -59,5 +67,8 @@ install: reptyr
 	test -z "$$bashcompdir" && bashcompdir=/etc/bash_completion.d ; \
 	install -d -m 755 $(DESTDIR)$$bashcompdir ; \
 	install -m 644 reptyr.bash $(DESTDIR)$$bashcompdir/reptyr
+
+codesign: reptyr
+	codesign -s reptyr ./reptyr
 
 .PHONY: PHONY
