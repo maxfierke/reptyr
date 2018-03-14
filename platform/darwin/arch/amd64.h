@@ -26,34 +26,34 @@
 
 static struct ptrace_personality arch_personality[2] = {
     {
-        offsetof(x86_thread_state_t, uts.ts64.__rax),
-        offsetof(x86_thread_state_t, uts.ts64.__rdi),
-        offsetof(x86_thread_state_t, uts.ts64.__rsi),
-        offsetof(x86_thread_state_t, uts.ts64.__rdx),
-        offsetof(x86_thread_state_t, uts.ts64.__rcx),
-        //offsetof(x86_thread_state_t, uts.ts64.__r10),
-        offsetof(x86_thread_state_t, uts.ts64.__r8),
-        offsetof(x86_thread_state_t, uts.ts64.__r9),
-        offsetof(x86_thread_state_t, uts.ts64.__rip),
+        offsetof(x86_thread_state64_t, __rax),
+        offsetof(x86_thread_state64_t, __rdi),
+        offsetof(x86_thread_state64_t, __rsi),
+        offsetof(x86_thread_state64_t, __rdx),
+        offsetof(x86_thread_state64_t, __rcx),
+        //offsetof(x86_thread_state64_t, __r10),
+        offsetof(x86_thread_state64_t, __r8),
+        offsetof(x86_thread_state64_t, __r9),
+        offsetof(x86_thread_state64_t, __rip),
     },
     {
-        offsetof(x86_thread_state_t, uts.ts64.__rax),
-        offsetof(x86_thread_state_t, uts.ts64.__rbx),
-        offsetof(x86_thread_state_t, uts.ts64.__rcx),
-        offsetof(x86_thread_state_t, uts.ts64.__rdx),
-        offsetof(x86_thread_state_t, uts.ts64.__rsi),
-        offsetof(x86_thread_state_t, uts.ts64.__rdi),
-        offsetof(x86_thread_state_t, uts.ts64.__rbp),
-        offsetof(x86_thread_state_t, uts.ts64.__rip),
+        offsetof(x86_thread_state64_t, __rax),
+        offsetof(x86_thread_state64_t, __rbx),
+        offsetof(x86_thread_state64_t, __rcx),
+        offsetof(x86_thread_state64_t, __rdx),
+        offsetof(x86_thread_state64_t, __rsi),
+        offsetof(x86_thread_state64_t, __rdi),
+        offsetof(x86_thread_state64_t, __rbp),
+        offsetof(x86_thread_state64_t, __rip),
     },
 };
 
 struct x86_personality x86_personality[2] = {
     {
-        offsetof(x86_thread_state_t, uts.ts64.__rax),
+        offsetof(x86_thread_state64_t, __rax),
     },
     {
-        offsetof(x86_thread_state_t, uts.ts64.__rax),
+        offsetof(x86_thread_state64_t, __rax),
     },
 };
 
@@ -65,7 +65,7 @@ struct syscall_numbers arch_syscall_numbers[2] = {
 int arch_get_personality(struct ptrace_child *child) {
     unsigned long cs;
 
-    cs = arch_get_register(child, offsetof(x86_thread_state_t, uts.ts64.__cs));
+    cs = arch_get_register(child, offsetof(x86_thread_state64_t, __cs));
     if (child->error)
         return -1;
     if (cs == 0x23)

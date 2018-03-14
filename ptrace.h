@@ -73,7 +73,14 @@ struct ptrace_child {
 	struct reg regs;
 #endif
 #ifdef __APPLE__
-    thread_state_t thread_state;
+    x86_thread_state64_t thread_state;
+    mach_port_t task_port;
+    mach_port_t exc_port;
+    exception_mask_t exc_masks[EXC_TYPES_COUNT];
+    mach_port_t exc_ports[EXC_TYPES_COUNT];
+    exception_behavior_t exc_behaviors[EXC_TYPES_COUNT];
+    thread_state_flavor_t exc_flavors[EXC_TYPES_COUNT];
+    mach_msg_type_number_t exc_mask_count;
 #endif
 };
 
