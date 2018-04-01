@@ -28,44 +28,9 @@
 #include "../../ptrace.h"
 #include <stdint.h>
 
-int parse_proc_stat(int statfd, struct proc_stat *out) {
-    char buf[1024];
-    int n;
-    unsigned dev;
-    lseek(statfd, 0, SEEK_SET);
-    if (read(statfd, buf, sizeof buf) < 0)
-        return assert_nonzero(errno);
-    n = sscanf(buf, "%d (%16[^)]) %c %d %d %d %u",
-               &out->pid, out->comm,
-               &out->state, &out->ppid, &out->pgid,
-               &out->sid, &dev);
-    if (n == EOF)
-        return assert_nonzero(errno);
-    if (n != 7) {
-        return EINVAL;
-    }
-    out->ctty = dev;
 
-    return 0;
-}
-
-int read_proc_stat(pid_t pid, struct proc_stat *out) {
-    char stat_path[PATH_MAX];
-    int statfd;
-    int err;
-
-    snprintf(stat_path, sizeof stat_path, "/proc/%d/stat", pid);
-    statfd = open(stat_path, O_RDONLY);
-    if (statfd < 0) {
-        error("Unable to open %s: %s", stat_path, strerror(errno));
-        return -statfd;
-    }
-    err = parse_proc_stat(statfd, out);
-
-
-    close(statfd);
-    return err;
-}
+extern int parse_proc_stat(int statfd, struct proc_stat *out);
+extern int read_proc_stat(pid_t pid, struct proc_stat *out);
 
 int read_uid(pid_t pid, uid_t *out) {
     char stat_path[PATH_MAX];
@@ -126,54 +91,6 @@ int find_terminal_emulator(struct steal_pty_state *steal) {
     debug("found terminal emulator process: %d", (int) leader_st.ppid);
     steal->emulator_pid = leader_st.ppid;
     return 0;
-}
-
-int check_pgroup(pid_t target) {
-    pid_t pg;
-    DIR *dir;
-    struct dirent *d;
-    pid_t pid;
-    char *p;
-    int err = 0;
-    struct proc_stat pid_stat;
-
-    debug("Checking for problematic process group members...");
-
-    pg = getpgid(target);
-    if (pg < 0) {
-        error("Unable to get pgid for pid %d", (int)target);
-        return errno;
-    }
-
-    if ((dir = opendir("/proc/")) == NULL)
-        return assert_nonzero(errno);
-
-    while ((d = readdir(dir)) != NULL) {
-        if (d->d_name[0] == '.') continue;
-        pid = strtol(d->d_name, &p, 10);
-        if (*p) continue;
-        if (pid == target) continue;
-        if (getpgid(pid) == pg) {
-            /*
-             * We are actually being somewhat overly-conservative here
-             * -- if pid is a child of target, and has not yet called
-             * execve(), reptyr's setpgid() strategy may suffice. That
-             * is a fairly rare case, and annoying to check for, so
-             * for now let's just bail out.
-             */
-            if ((err = read_proc_stat(pid, &pid_stat))) {
-                memcpy(pid_stat.comm, "???", 4);
-            }
-            error("Process %d (%.*s) shares %d's process group. Unable to attach.\n"
-                  "(This most commonly means that %d has sub-processes).",
-                  (int)pid, TASK_COMM_LENGTH, pid_stat.comm, (int)target, (int)target);
-            err = EINVAL;
-            goto out;
-        }
-    }
-out:
-    closedir(dir);
-    return err;
 }
 
 int check_proc_stopped(pid_t pid, int fd) {
