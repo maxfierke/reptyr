@@ -31,6 +31,7 @@
 
 extern int parse_proc_stat(int statfd, struct proc_stat *out);
 extern int read_proc_stat(pid_t pid, struct proc_stat *out);
+extern int find_terminal_emulator(struct steal_pty_state *steal);
 
 int read_uid(pid_t pid, uid_t *out) {
     char stat_path[PATH_MAX];
@@ -72,25 +73,6 @@ int read_uid(pid_t pid, uid_t *out) {
  out:
     close(statfd);
     return err;
-}
-
-// Find the PID of the terminal emulator for `target's terminal.
-//
-// We assume that the terminal emulator is the parent of the session
-// leader. This is true in most cases, although in principle you can
-// construct situations where it is false. We should fail safe later
-// on if this turns out to be wrong, however.
-int find_terminal_emulator(struct steal_pty_state *steal) {
-    debug("session leader of pid %d = %d",
-          (int)steal->target_stat.pid,
-          (int)steal->target_stat.sid);
-    struct proc_stat leader_st;
-    int err;
-    if ((err = read_proc_stat(steal->target_stat.sid, &leader_st)))
-        return err;
-    debug("found terminal emulator process: %d", (int) leader_st.ppid);
-    steal->emulator_pid = leader_st.ppid;
-    return 0;
 }
 
 int check_proc_stopped(pid_t pid, int fd) {

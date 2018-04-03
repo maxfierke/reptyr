@@ -4,7 +4,7 @@ use platform::TASK_COMM_LENGTH;
 use errno::errno;
 use error;
 use debug;
-use platform::proc_stat;
+use platform::{proc_stat,steal_pty_state};
 use libc::{
   c_char,
   c_int,
@@ -185,4 +185,40 @@ pub unsafe extern fn check_pgroup(target: pid_t) -> c_int {
 
     closedir(dir);
     return err;
+}
+
+// Find the PID of the terminal emulator for `target's terminal.
+//
+// We assume that the terminal emulator is the parent of the session
+// leader. This is true in most cases, although in principle you can
+// construct situations where it is false. We should fail safe later
+// on if this turns out to be wrong, however.
+#[no_mangle]
+pub unsafe extern fn find_terminal_emulator(steal: *mut steal_pty_state) -> c_int {
+    debug(
+        cstr!("session leader of pid %d = %d"),
+        (*steal).target_stat.pid as c_int,
+        (*steal).target_stat.sid as c_int
+    );
+    let mut leader_st = proc_stat {
+        pid: 0,
+        comm: ['\0' as c_char; TASK_COMM_LENGTH+1],
+        state: '\0' as c_char,
+        ppid: 0,
+        sid: 0,
+        pgid: 0,
+        ctty: 0
+    };
+
+    let err = read_proc_stat((*steal).target_stat.sid, &mut leader_st as *mut proc_stat);
+
+    if err != 0 {
+        return err;
+    }
+
+    debug(cstr!("found terminal emulator process: %d"), leader_st.ppid as c_int);
+
+    (*steal).emulator_pid = leader_st.ppid;
+
+    0
 }
