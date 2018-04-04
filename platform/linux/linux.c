@@ -75,18 +75,6 @@ int read_uid(pid_t pid, uid_t *out) {
     return err;
 }
 
-int check_proc_stopped(pid_t pid, int fd) {
-    struct proc_stat st;
-
-    if (parse_proc_stat(fd, &st))
-        return 1;
-
-    if (st.state == 'T')
-        return 1;
-
-    return 0;
-}
-
 int *get_child_tty_fds(struct ptrace_child *child, int statfd, int *count) {
     struct proc_stat child_status;
     struct stat tty_st, console_st, st;

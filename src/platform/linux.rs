@@ -222,3 +222,26 @@ pub unsafe extern fn find_terminal_emulator(steal: *mut steal_pty_state) -> c_in
 
     0
 }
+
+#[no_mangle]
+pub unsafe extern fn check_proc_stopped(_pid: pid_t, fd: c_int) -> c_int {
+    let mut st = proc_stat {
+        pid: 0,
+        comm: ['\0' as c_char; TASK_COMM_LENGTH+1],
+        state: '\0' as c_char,
+        ppid: 0,
+        sid: 0,
+        pgid: 0,
+        ctty: 0
+    };
+
+    if parse_proc_stat(fd, &mut st) != 0 {
+        return 1;
+    }
+
+    if (st.state as u8 as char) == 'T' {
+        return 1;
+    }
+
+    return 0;
+}
