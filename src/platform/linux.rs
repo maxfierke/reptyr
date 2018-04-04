@@ -16,9 +16,12 @@ use libc::{
   EOF,
   getpgid,
   lseek,
+  major,
   memchr,
   memcpy,
+  O_NOCTTY,
   O_RDONLY,
+  O_RDWR,
   open,
   opendir,
   PATH_MAX,
@@ -37,6 +40,10 @@ use libc::{
 use std::fs::File;
 use std::io::prelude::*;
 use std::ptr;
+
+// From #include <linux/major.h>
+// Defined as UNIX98_PTY_MASTER_MAJOR + UNIX98_PTY_MAJOR_COUNT
+const UNIX98_PTY_SLAVE_MAJOR: u32 = 128 + 8;
 
 #[no_mangle]
 pub extern fn check_ptrace_scope() -> () {
@@ -305,4 +312,34 @@ pub unsafe extern fn check_proc_stopped(_pid: pid_t, fd: c_int) -> c_int {
     }
 
     return 0;
+}
+
+#[no_mangle]
+pub unsafe extern fn get_terminal_state(steal: *mut steal_pty_state, target: pid_t) -> c_int {
+    let mut err = read_proc_stat(target, &mut (*steal).target_stat);
+
+    if err != 0 {
+        return err;
+    }
+
+    if major((*steal).target_stat.ctty) != UNIX98_PTY_SLAVE_MAJOR {
+        error(cstr!("Child is not connected to a pseudo-TTY. Unable to steal TTY."));
+        return EINVAL;
+    }
+
+    err = find_terminal_emulator(steal);
+
+    if err != 0 {
+        return err;
+    }
+
+    err = read_uid((*steal).emulator_pid, &mut (*steal).emulator_uid);
+
+    err
+}
+
+/* Homebrew posix_openpt() */
+#[no_mangle]
+pub unsafe extern fn get_pt() -> c_int {
+    open(cstr!("/dev/ptmx"), O_RDWR | O_NOCTTY)
 }

@@ -86,26 +86,6 @@ int *get_child_tty_fds(struct ptrace_child *child, int statfd, int *count) {
     return fds.fds;
 }
 
-int get_terminal_state(struct steal_pty_state *steal, pid_t target) {
-    int err;
-
-    if ((err = read_proc_stat(target, &steal->target_stat)))
-        return err;
-
-    if (major(steal->target_stat.ctty) != UNIX98_PTY_SLAVE_MAJOR) {
-        error("Child is not connected to a pseudo-TTY. Unable to steal TTY.");
-        return EINVAL;
-    }
-
-    if ((err = find_terminal_emulator(steal)))
-        return err;
-
-    if ((err = read_uid(steal->emulator_pid, &steal->emulator_uid)))
-        return err;
-
-    return 0;
-}
-
 // ptmx(4) and Linux Documentation/devices.txt document
 // /dev/ptmx has having major 5 and minor 2. I can't find any
 // constants in headers after a brief glance that I should be
@@ -166,11 +146,6 @@ int find_master_fd(struct steal_pty_state *steal) {
         return ESRCH;
     }
     return 0;
-}
-
-/* Homebrew posix_openpt() */
-int get_pt() {
-    return open("/dev/ptmx", O_RDWR | O_NOCTTY);
 }
 
 int get_process_tty_termios(pid_t pid, struct termios *tio) {
