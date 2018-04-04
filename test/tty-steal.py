@@ -20,6 +20,7 @@ child.sendline("hello")
 child.expect("ECHO: hello")
 
 reptyr = pexpect.spawn("./reptyr -T %d" % (child.pid,))
+reptyr.logfile = sys.stdout
 reptyr.sendline("world")
 reptyr.expect("ECHO: world")
 

@@ -16,6 +16,7 @@ use libc::{
   EOF,
   getpgid,
   lseek,
+  memchr,
   memcpy,
   O_RDONLY,
   open,
@@ -28,7 +29,10 @@ use libc::{
   snprintf,
   sscanf,
   strerror,
-  strtol
+  strlen,
+  strncmp,
+  strtol,
+  uid_t
 };
 use std::fs::File;
 use std::io::prelude::*;
@@ -104,6 +108,63 @@ pub unsafe extern fn read_proc_stat(pid: pid_t, out: *mut proc_stat) -> c_int {
         return -statfd;
     }
     err = parse_proc_stat(statfd, out);
+
+    close(statfd);
+    return err;
+}
+
+#[no_mangle]
+pub unsafe extern fn read_uid(pid: pid_t, out: *mut uid_t) -> c_int {
+    let buf = ['\0' as c_char; 1024];
+    let mut p = buf.as_ptr() as *mut i8;
+    let stat_path = ['\0' as c_char; PATH_MAX as usize];
+    let statfd: c_int;
+    let err: c_int = 0;
+
+    snprintf(
+        stat_path.as_ptr() as *mut i8,
+        PATH_MAX as usize,
+        cstr!("/proc/%d/status"),
+        pid
+    );
+
+    statfd = open(stat_path.as_ptr() as *mut i8, O_RDONLY);
+    if statfd < 0 {
+        error(cstr!("Unable to open %s: %s"), stat_path, strerror(errno().0));
+        return -statfd;
+    }
+
+    let n = read(statfd, buf.as_ptr() as *mut c_void, 1024);
+
+    if n < 0 {
+        close(statfd);
+        return assert_nonzero!(errno().0);
+    }
+
+    while *p < *buf.as_ptr().offset(n) {
+        if strncmp(p, cstr!("Uid:\t"), strlen(cstr!("Uid:\t"))) == 0 {
+            break;
+        }
+        p = memchr(
+            p as *const c_void,
+            '\n' as c_int,
+            (*buf.as_ptr().offset(n) - *p) as usize
+        ) as *mut i8;
+        if p.is_null() {
+            break;
+        }
+        *p += 1;
+    }
+
+    if p.is_null() || *p >= *buf.as_ptr().offset(n) {
+        debug(cstr!("Unable to parse emulator uid: no Uid line found"));
+        *out = u32::max_value();
+        close(statfd);
+        return err;
+    }
+    if sscanf(p, cstr!("Uid:\t%d"), out) < 0 {
+        debug(cstr!("Unable to parse emulator uid: unparseable Uid line"));
+    }
 
     close(statfd);
     return err;

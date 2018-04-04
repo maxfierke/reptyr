@@ -28,52 +28,10 @@
 #include "../../ptrace.h"
 #include <stdint.h>
 
-
 extern int parse_proc_stat(int statfd, struct proc_stat *out);
 extern int read_proc_stat(pid_t pid, struct proc_stat *out);
 extern int find_terminal_emulator(struct steal_pty_state *steal);
-
-int read_uid(pid_t pid, uid_t *out) {
-    char stat_path[PATH_MAX];
-    char buf[1024];
-    int statfd;
-    int err = 0;
-    int n;
-    char *p = buf;
-
-    snprintf(stat_path, sizeof stat_path, "/proc/%d/status", pid);
-    statfd = open(stat_path, O_RDONLY);
-    if (statfd < 0) {
-        error("Unable to open %s: %s", stat_path, strerror(errno));
-        return -statfd;
-    }
-
-    if ((n = read(statfd, buf, sizeof(buf))) < 0) {
-        err = assert_nonzero(errno);
-        goto out;
-    }
-    while (p < buf + n) {
-        if (strncmp(p, "Uid:\t", strlen("Uid:\t")) == 0)
-            break;
-        p = memchr(p, '\n', buf+n-p);
-        if (p == NULL)
-            break;
-        p++;
-        continue;
-    }
-    if (p == NULL || p >= buf + n) {
-        debug("Unable to parse emulator uid: no Uid line found");
-        *out = -1;
-        goto out;
-    }
-    if(sscanf(p, "Uid:\t%d", out) < 0) {
-        debug("Unable to parse emulator uid: unparseable Uid line");
-    }
-
- out:
-    close(statfd);
-    return err;
-}
+extern int read_uid(pid_t pid, uid_t *out);
 
 int *get_child_tty_fds(struct ptrace_child *child, int statfd, int *count) {
     struct proc_stat child_status;
