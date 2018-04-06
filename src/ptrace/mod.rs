@@ -20,11 +20,11 @@ pub enum child_state {
 
 #[repr(C)]
 pub struct ptrace_child {
-    pid: pid_t,
+    pub pid: pid_t,
     state: child_state,
     personality: c_int,
     status: c_int,
-    error: c_int,
+    pub error: c_int,
     forked_pid: c_ulong,
     saved_syscall: c_ulong,
     #[cfg(target_os = "linux")]

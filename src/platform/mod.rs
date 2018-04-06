@@ -33,6 +33,16 @@ pub struct fd_array {
     allocated: c_int
 }
 
+impl Default for fd_array {
+    fn default() -> fd_array {
+        fd_array {
+            fds: ptr::null_mut(),
+            n: 0,
+            allocated: 0
+        }
+    }
+}
+
 #[repr(C)]
 pub struct proc_stat {
     pid: pid_t,
@@ -42,6 +52,20 @@ pub struct proc_stat {
     sid: pid_t,
     pgid: pid_t,
     ctty: dev_t
+}
+
+impl Default for proc_stat {
+    fn default() -> proc_stat {
+        proc_stat {
+            pid: 0,
+            comm: ['\0' as c_char; TASK_COMM_LENGTH+1],
+            state: '\0' as c_char,
+            ppid: 0,
+            sid: 0,
+            pgid: 0,
+            ctty: 0
+        }
+    }
 }
 
 #[repr(C)]

@@ -76,7 +76,7 @@ struct steal_pty_state {
 extern void check_ptrace_scope(void);
 extern int check_pgroup(pid_t target);
 extern int check_proc_stopped(pid_t pid, int fd);
-int *get_child_tty_fds(struct ptrace_child *child, int statfd, int *count);
+extern int *get_child_tty_fds(struct ptrace_child *child, int statfd, int *count);
 extern int get_terminal_state(struct steal_pty_state *steal, pid_t target);
 int find_master_fd(struct steal_pty_state *steal);
 int get_pt();

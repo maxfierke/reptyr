@@ -29,62 +29,7 @@
 #include <stdint.h>
 
 extern int parse_proc_stat(int statfd, struct proc_stat *out);
-extern int read_proc_stat(pid_t pid, struct proc_stat *out);
 extern int find_terminal_emulator(struct steal_pty_state *steal);
-extern int read_uid(pid_t pid, uid_t *out);
-
-int *get_child_tty_fds(struct ptrace_child *child, int statfd, int *count) {
-    struct proc_stat child_status;
-    struct stat tty_st, console_st, st;
-    char buf[PATH_MAX];
-    struct fd_array fds = {};
-    DIR *dir;
-    struct dirent *d;
-
-    debug("Looking up fds for tty in child.");
-    if ((child->error = parse_proc_stat(statfd, &child_status)))
-        return NULL;
-
-    debug("Resolved child tty: %x", (unsigned)child_status.ctty);
-
-    if (stat("/dev/tty", &tty_st) < 0) {
-        child->error = assert_nonzero(errno);
-        error("Unable to stat /dev/tty");
-        return NULL;
-    }
-
-    if (stat("/dev/console", &console_st) < 0) {
-        error("Unable to stat /dev/console");
-        console_st = (struct stat){
-            .st_rdev = -1,
-        };
-    }
-
-    snprintf(buf, sizeof buf, "/proc/%d/fd/", child->pid);
-    if ((dir = opendir(buf)) == NULL)
-        return NULL;
-    while ((d = readdir(dir)) != NULL) {
-        if (d->d_name[0] == '.') continue;
-        snprintf(buf, sizeof buf, "/proc/%d/fd/%s", child->pid, d->d_name);
-        if (stat(buf, &st) < 0)
-            continue;
-
-        if (st.st_rdev == child_status.ctty
-            || st.st_rdev == tty_st.st_rdev
-            || st.st_rdev == console_st.st_rdev) {
-            debug("Found an alias for the tty: %s", d->d_name);
-            if (fd_array_push(&fds, atoi(d->d_name)) != 0) {
-                child->error = assert_nonzero(errno);
-                error("Unable to allocate memory for fd array.");
-                goto out;
-            }
-        }
-    }
- out:
-    *count = fds.n;
-    closedir(dir);
-    return fds.fds;
-}
 
 // ptmx(4) and Linux Documentation/devices.txt document
 // /dev/ptmx has having major 5 and minor 2. I can't find any

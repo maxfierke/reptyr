@@ -1,11 +1,18 @@
 extern crate libc;
 
-use platform::TASK_COMM_LENGTH;
 use errno::errno;
 use error;
 use debug;
-use platform::{proc_stat,steal_pty_state};
+use platform::{
+    fd_array,
+    fd_array_push,
+    proc_stat,
+    steal_pty_state,
+    TASK_COMM_LENGTH
+};
+use ptrace::ptrace_child;
 use libc::{
+  atoi,
   c_char,
   c_int,
   c_void,
@@ -31,6 +38,7 @@ use libc::{
   SEEK_SET,
   snprintf,
   sscanf,
+  stat,
   strerror,
   strlen,
   strncmp,
@@ -39,6 +47,7 @@ use libc::{
 };
 use std::fs::File;
 use std::io::prelude::*;
+use std::mem;
 use std::ptr;
 
 // From #include <linux/major.h>
@@ -181,15 +190,7 @@ pub unsafe extern fn read_uid(pid: pid_t, out: *mut uid_t) -> c_int {
 pub unsafe extern fn check_pgroup(target: pid_t) -> c_int {
     let mut p = ptr::null::<c_char>() as *mut c_char;
     let mut err: c_int = 0;
-    let mut pid_stat = proc_stat {
-        pid: 0,
-        comm: ['\0' as c_char; TASK_COMM_LENGTH+1],
-        state: '\0' as c_char,
-        ppid: 0,
-        sid: 0,
-        pgid: 0,
-        ctty: 0
-    };
+    let mut pid_stat: proc_stat = Default::default();
 
     debug(cstr!("Checking for problematic process group members..."));
 
@@ -255,6 +256,90 @@ pub unsafe extern fn check_pgroup(target: pid_t) -> c_int {
     return err;
 }
 
+#[no_mangle]
+pub unsafe extern fn get_child_tty_fds(child: *mut ptrace_child, statfd: c_int, count: *mut c_int) -> *mut c_int {
+    let mut child_status: proc_stat = Default::default();
+    let mut tty_st: stat = mem::zeroed();
+    let mut console_st: stat = mem::zeroed();
+    let mut st: stat = mem::zeroed();
+    let buf = ['\0' as c_char; PATH_MAX as usize];
+    let mut fds: fd_array = Default::default();
+
+    debug(cstr!("Looking up fds for tty in child."));
+
+    (*child).error = parse_proc_stat(statfd, &mut child_status);
+
+    if (*child).error != 0 {
+        return 0 as *mut c_int;
+    }
+
+    debug(cstr!("Resolved child tty: %x"), child_status.ctty);
+
+    if stat(cstr!("/dev/tty"), &mut tty_st) < 0 {
+        (*child).error = assert_nonzero!(errno().0);
+        error(cstr!("Unable to stat /dev/tty"));
+        return 0 as *mut c_int;
+    }
+
+    if stat(cstr!("/dev/console"), &mut console_st) < 0 {
+        error(cstr!("Unable to stat /dev/console"));
+        console_st.st_rdev = u64::max_value();
+    }
+
+    snprintf(
+        buf.as_ptr() as *mut i8,
+        PATH_MAX as usize,
+        cstr!("/proc/%d/fd/"),
+        (*child).pid
+    );
+
+
+    let dir: *mut DIR = opendir(buf.as_ptr() as *mut i8);
+
+    if dir.is_null() {
+        assert_nonzero!(errno().0);
+        return 0 as *mut c_int;
+    }
+
+    let mut d = readdir(dir);
+
+    while !d.is_null() {
+        if (*d).d_name[0] == ('.' as i8) {
+            d = readdir(dir);
+            continue;
+        }
+
+        snprintf(
+            buf.as_ptr() as *mut i8,
+            PATH_MAX as usize,
+            cstr!("/proc/%d/fd/%s"),
+            (*child).pid,
+            (*d).d_name
+        );
+
+        if stat(buf.as_ptr(), &mut st) < 0 {
+            continue;
+        }
+
+        if st.st_rdev == child_status.ctty ||
+           st.st_rdev == tty_st.st_rdev ||
+           st.st_rdev == console_st.st_rdev {
+            debug(cstr!("Found an alias for the tty: %s"), &(*d).d_name as *const c_char);
+            if fd_array_push(&mut fds, atoi(&(*d).d_name as *const c_char)) != 0 {
+                (*child).error = assert_nonzero!(errno().0);
+                error(cstr!("Unable to allocate memory for fd array."));
+                break;
+            }
+        }
+
+        d = readdir(dir);
+    }
+
+    *count = fds.n;
+    closedir(dir);
+    return fds.fds;
+}
+
 // Find the PID of the terminal emulator for `target's terminal.
 //
 // We assume that the terminal emulator is the parent of the session
@@ -268,15 +353,7 @@ pub unsafe extern fn find_terminal_emulator(steal: *mut steal_pty_state) -> c_in
         (*steal).target_stat.pid as c_int,
         (*steal).target_stat.sid as c_int
     );
-    let mut leader_st = proc_stat {
-        pid: 0,
-        comm: ['\0' as c_char; TASK_COMM_LENGTH+1],
-        state: '\0' as c_char,
-        ppid: 0,
-        sid: 0,
-        pgid: 0,
-        ctty: 0
-    };
+    let mut leader_st: proc_stat = Default::default();
 
     let err = read_proc_stat((*steal).target_stat.sid, &mut leader_st as *mut proc_stat);
 
@@ -293,15 +370,7 @@ pub unsafe extern fn find_terminal_emulator(steal: *mut steal_pty_state) -> c_in
 
 #[no_mangle]
 pub unsafe extern fn check_proc_stopped(_pid: pid_t, fd: c_int) -> c_int {
-    let mut st = proc_stat {
-        pid: 0,
-        comm: ['\0' as c_char; TASK_COMM_LENGTH+1],
-        state: '\0' as c_char,
-        ppid: 0,
-        sid: 0,
-        pgid: 0,
-        ctty: 0
-    };
+    let mut st: proc_stat = Default::default();
 
     if parse_proc_stat(fd, &mut st) != 0 {
         return 1;
