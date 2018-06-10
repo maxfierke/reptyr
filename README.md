@@ -1,5 +1,32 @@
-reptyr - A tool for "re-ptying" programs.
-=========================================
+# rust port of reptyr
+
+This branch is for porting reptyr to rust
+
+## Why?
+
+1. I wanted to learn Rust
+2. I started adding macOS support and was getting annoyed by the lack of docs
+   for mach APIs. Then I stumbled upon the `mach` crate in Rust. Two birds.
+
+## Who?
+
+[Me.](https://github.com/maxfierke)
+
+## Does it work?
+
+Yes (or at least the tests pass). My aim is keep this branch passing the test
+suite as I work.
+
+## When?
+
+You're guess is as good as mine. Some functions are a quick and easy port. Others
+are much more tricky. There's still some stuff that _has_ to be C for now, that
+needs to be worked around, so there can be some tricky pointer & FFI stuff. It
+will hopefully speed up once the Linux platform stuff is squared away.
+
+---
+
+# reptyr - A tool for "re-ptying" programs.
 
 reptyr is a utility for taking an existing running program and
 attaching it to a new terminal. Started a long-running process over
@@ -7,8 +34,7 @@ ssh, but have to leave and don't want to interrupt it? Just start a
 screen, use reptyr to grab it, and then kill the ssh session and head
 on home.
 
-USAGE
------
+## USAGE
 
     reptyr PID
 
@@ -21,8 +47,7 @@ background it, you will still have to run "bg" or "fg" in the old
 terminal. This is likely impossible to fix in a reasonable way without
 patching your shell.)
 
-Typical usage pattern
----------------------
+### Typical usage pattern
 
 * Start a long running process, e.g. `top`
 * Background the process with CTRL-Z
@@ -36,8 +61,7 @@ Typical usage pattern
 * Detach your terminal multiplexer (e.g. CTRL-A D) and close ssh
 * Reconnect ssh, attach to your multiplexer (e.g. `tmux attach`), rejoice!
 
-"But wait, isn't this just screenify?"
---------------------------------------
+## "But wait, isn't this just screenify?"
 
 There's a shell script called "screenify" that's been going around the
 internet for nigh on 10 years now that uses gdb to (supposedly)
@@ -53,8 +77,7 @@ reptyr fixes all of these problems, and is the only such tool I know
 of that does so. See below for some more details on how it
 accomplishes this.
 
-PORTABILITY
------------
+## PORTABILITY
 
 reptyr supports Linux and FreeBSD. Not all functionality is currently
 available on FreeBSD. (Notably, FreeBSD doesn't support `reptyr -T` at
@@ -71,8 +94,7 @@ reptyr works on i386, x86_64, and ARM. Ports to other architectures should be
 straightforward, and should in most cases be as simple as adding an arch/ARCH.h
 file and adding a clause to the ifdef ladder in ptrace.c.
 
-ptrace_scope on Ubuntu Maverick and up
---------------------------------------
+### ptrace_scope on Ubuntu Maverick and up
 
 `reptyr` depends on the `ptrace` system call to attach to the remote program. On
 Ubuntu Maverick and higher, this ability is disabled by default for security
@@ -83,8 +105,7 @@ reasons. You can enable it temporarily by doing
 as root, or permanently by editing the file /etc/sysctl.d/10-ptrace.conf, which
 also contains more information about exactly what this setting accomplishes.
 
-reptyr -l
----------
+## reptyr -l
 
 As a bonus feature, if you run "reptyr -l", reptyr will create a new
 pseudo-terminal pair with nothing attached to the slave end, and print
@@ -95,8 +116,7 @@ inferior-pty". Because there is no existing program listening to that
 tty, this will work much better than passing an existing shell's
 terminal.
 
-How does it work?
------------------
+## How does it work?
 
 The main thing that reptyr does that no one else does is that it
 actually changes the controlling terminal of the process you are
@@ -104,18 +124,17 @@ attaching. I wrote a
 [blog post](https://blog.nelhage.com/2011/02/changing-ctty/)
 explaining just what the shenanigans involved are.
 
-PRONUNCIATION
--------------
+## PRONUNCIATION
 
 I pronounce it like "repeater", but since that's easily ambiguous,
 "re-P-T-Y-er" is also acceptable.
 
 
-CREDITS
--------
+## CREDITS
+
 reptyr was written by Nelson Elhage <nelhage@nelhage.com>. Contact him
 with any questions or bug reports.
 
-URL
----
+## URL
+
 http://github.com/nelhage/reptyr
