@@ -15,13 +15,13 @@ use libc::{
 };
 use std::mem::{size_of};
 use std::ptr;
+use ptrace::{ptrace_child};
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
 pub use self::linux::*;
 
-use ptrace::{ptrace_child};
 use xreallocarray;
 
 const TASK_COMM_LENGTH: usize = 16;

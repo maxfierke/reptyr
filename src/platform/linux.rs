@@ -1,5 +1,10 @@
 extern crate libc;
 
+use ptrace::{
+    ptrace_memcpy_from_child,
+    ptrace_remote_syscall,
+    ptrace_syscall_numbers
+};
 use errno::errno;
 use error;
 use debug;
@@ -21,9 +26,13 @@ use libc::{
   DIR,
   EINVAL,
   EOF,
+  ENOMEM,
+  ESRCH,
   getpgid,
   lseek,
   major,
+  minor,
+  makedev,
   memchr,
   memcpy,
   O_NOCTTY,
@@ -318,6 +327,7 @@ pub unsafe extern fn get_child_tty_fds(child: *mut ptrace_child, statfd: c_int, 
         );
 
         if stat(buf.as_ptr(), &mut st) < 0 {
+            d = readdir(dir);
             continue;
         }
 
@@ -405,6 +415,133 @@ pub unsafe extern fn get_terminal_state(steal: *mut steal_pty_state, target: pid
     err = read_uid((*steal).emulator_pid, &mut (*steal).emulator_uid);
 
     err
+}
+
+// Find the fd(s) in the terminal emulator process that corresponds to
+// the master side of the target's pty. Store the result in
+// steal->master_fds.
+#[no_mangle]
+pub unsafe extern fn find_master_fd(steal: *mut steal_pty_state) -> c_int {
+    let mut st: stat = mem::zeroed();
+    let buf = ['\0' as c_char; PATH_MAX as usize];
+
+    snprintf(
+        buf.as_ptr() as *mut i8,
+        PATH_MAX as usize,
+        cstr!("/proc/%d/fd/"),
+        (*steal).child.pid
+    );
+
+    let dir: *mut DIR = opendir(buf.as_ptr() as *mut i8);
+
+    if dir.is_null() {
+        assert_nonzero!(errno().0);
+        return 0;
+    }
+
+    let mut d = readdir(dir);
+
+    // from original source:
+    // ptmx(4) and Linux Documentation/devices.txt document
+    // /dev/ptmx has having major 5 and minor 2. I can't find any
+    // constants in headers after a brief glance that I should be
+    // using here.
+    let ptmx_device = makedev(5, 2);
+
+    while !d.is_null() {
+        if (*d).d_name[0] == ('.' as i8) {
+            d = readdir(dir);
+            continue;
+        }
+
+        debug(cstr!("checking fd to see if it's ptmx: %s"), (*d).d_name.as_ptr());
+
+        snprintf(
+            buf.as_ptr() as *mut i8,
+            PATH_MAX as usize,
+            cstr!("/proc/%d/fd/%s"),
+            (*steal).child.pid,
+            (*d).d_name.as_ptr()
+        );
+
+        if stat(buf.as_ptr(), &mut st) < 0 {
+            debug(cstr!("Couldn't stat. Skipping to the next FD."));
+            d = readdir(dir);
+            continue;
+        }
+
+        debug(
+            cstr!("Checking fd: %s: st_dev=%x"),
+            (*d).d_name.as_ptr(),
+            st.st_rdev as c_int
+        );
+
+        if st.st_rdev != ptmx_device {
+            debug(cstr!("Not a ptmx. Skipping to the next FD."));
+            d = readdir(dir);
+            continue;
+        }
+
+
+        debug(cstr!("found a ptmx fd: %s"), (*d).d_name.as_ptr());
+
+        let child = &mut (*steal).child;
+        let syscalls = &*ptrace_syscall_numbers(child as *mut ptrace_child);
+
+        // TODO: use the ioctls crate or something instead of this magic number
+        const TIOCGPTN: u64 = 0x80045430;
+
+        let tty_id = atoi((*d).d_name.as_ptr());
+        let mut err = ptrace_remote_syscall(
+            child,
+            syscalls.nr_ioctl as u64,
+            tty_id as u64,
+            TIOCGPTN,
+            (*steal).child_scratch,
+            0,
+            0,
+            0
+        );
+
+        if err < 0 {
+            debug(cstr!("Error doing TIOCGPTN: %s"), strerror(-err as i32));
+            d = readdir(dir);
+            continue;
+        }
+
+        debug(cstr!("TIOCGPTN succeeded."));
+
+        let mut ptn: c_int = mem::zeroed();
+
+        err = ptrace_memcpy_from_child(
+            child,
+            &mut ptn as *mut c_int as *mut c_void,
+            (*steal).child_scratch,
+            mem::size_of::<c_int>()
+        ).into();
+
+        if err < 0 {
+            debug(cstr!(" error getting ptn: %s"), strerror(child.error));
+            d = readdir(dir);
+            continue;
+        }
+
+        if ptn == minor((*steal).target_stat.ctty) as c_int {
+            debug(cstr!("found a master fd: %d"), tty_id);
+            if fd_array_push(&mut (*steal).master_fds, tty_id) != 0 {
+                error(cstr!("unable to allocate memory for fd array!"));
+                return ENOMEM;
+            }
+        }
+
+        d = readdir(dir);
+    }
+
+    if (*steal).master_fds.n == 0 {
+        return ESRCH;
+    }
+
+    0
 }
 
 /* Homebrew posix_openpt() */
