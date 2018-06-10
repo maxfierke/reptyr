@@ -102,7 +102,7 @@ int ptrace_advance_to_state(struct ptrace_child *child,
                             enum child_state desired);
 int ptrace_save_regs(struct ptrace_child *child);
 int ptrace_restore_regs(struct ptrace_child *child);
-unsigned long ptrace_remote_syscall(struct ptrace_child *child,
+long ptrace_remote_syscall(struct ptrace_child *child,
                                     unsigned long sysno,
                                     unsigned long p0, unsigned long p1,
                                     unsigned long p2, unsigned long p3,

@@ -216,12 +216,12 @@ int ptrace_restore_regs(struct ptrace_child *child) {
     return arch_restore_syscall(child);
 }
 
-unsigned long ptrace_remote_syscall(struct ptrace_child *child,
+long ptrace_remote_syscall(struct ptrace_child *child,
                                     unsigned long sysno,
                                     unsigned long p0, unsigned long p1,
                                     unsigned long p2, unsigned long p3,
                                     unsigned long p4, unsigned long p5) {
-    unsigned long rv;
+    long rv;
     if (ptrace_advance_to_state(child, ptrace_at_syscall) < 0)
         return -1;
 
