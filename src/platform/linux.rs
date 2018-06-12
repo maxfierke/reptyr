@@ -2,6 +2,7 @@ extern crate libc;
 
 use ptrace::{
     ptrace_memcpy_from_child,
+    ptrace_memcpy_to_child,
     ptrace_remote_syscall,
     ptrace_syscall_numbers
 };
@@ -20,6 +21,7 @@ use libc::{
   atoi,
   c_char,
   c_int,
+  c_ulong,
   c_void,
   close,
   closedir,
@@ -590,4 +592,102 @@ pub unsafe extern fn get_process_tty_termios(pid: pid_t, tio: *mut termios) -> c
     }
 
     return err;
+}
+
+#[no_mangle]
+pub unsafe extern fn move_process_group(child: *mut ptrace_child, from: pid_t, to: pid_t) -> () {
+    let mut p = ptr::null::<c_char>() as *mut c_char;
+    let dir: *mut DIR = opendir(cstr!("/proc/"));
+
+    if dir.is_null() {
+        return;
+    }
+
+    let mut d = readdir(dir);
+
+    while !d.is_null() {
+        if (*d).d_name[0] == ('.' as i8) {
+            d = readdir(dir);
+            continue;
+        }
+
+        let pid = strtol((*d).d_name.as_ptr(), &mut p as *mut *mut c_char, 10);
+
+        if p.is_null() {
+            // Noop
+        } else if (*p) != 0 {
+            // Noop
+        } else if getpgid(pid as i32) == from {
+            debug(cstr!("Change pgid for pid %d"), pid);
+            let syscalls = &*ptrace_syscall_numbers(child as *mut ptrace_child);
+
+            let err = ptrace_remote_syscall(
+                child,
+                syscalls.nr_setpgid as u64,
+                pid as u64,
+                to as u64,
+                0,
+                0,
+                0,
+                0
+            );
+
+            if err < 0 {
+                error(cstr!(" failed: %s"), strerror(-err as i32));
+            }
+        }
+
+        d = readdir(dir);
+    }
+
+    closedir(dir);
+}
+
+#[no_mangle]
+pub unsafe extern fn copy_user(dest: *mut ptrace_child, src: *mut ptrace_child) -> () {
+    memcpy(
+        &mut (*dest).user as *mut libc::user as *mut c_void,
+        &(*src).user as *const libc::user as *const c_void,
+        mem::size_of::<libc::user>()
+    );
+
+    ()
+}
+
+#[no_mangle]
+pub unsafe extern fn ptrace_socketcall(
+    child: *mut ptrace_child,
+    scratch: c_ulong,
+    socketcall: c_ulong,
+    p0: u32,
+    p1: u32,
+    p2: u32,
+    p3: u32,
+    p4: u32
+) -> u32 {
+    // We assume that socketcall is only used on 32-bit
+    // architectures. If there are any 64-bit architectures that do
+    // socketcall, and we port to them, this will need to change.
+    let args = [p0, p1, p2, p3, p4];
+    let err = ptrace_memcpy_to_child(
+        child,
+        scratch,
+        args.as_ptr() as *mut c_void,
+        mem::size_of_val(&args)
+    );
+
+    if err < 0 {
+        return err as u32;
+    }
+
+    ptrace_remote_syscall(
+        child,
+        socketcall,
+        socketcall,
+        scratch,
+        0,
+        0,
+        0,
+        0
+    ) as u32
 }

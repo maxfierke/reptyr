@@ -58,7 +58,7 @@
 #include <sys/stat.h>
 
 struct ptrace_child;
-unsigned long ptrace_socketcall(struct ptrace_child *child,
+extern unsigned long ptrace_socketcall(struct ptrace_child *child,
                                 unsigned long scratch,
                                 unsigned long socketcall,
                                 unsigned long p0, unsigned long p1,

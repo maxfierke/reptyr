@@ -25,14 +25,14 @@ pub enum child_state {
 #[derive(Copy, Clone)]
 pub struct ptrace_child {
     pub pid: pid_t,
-    state: child_state,
-    personality: c_int,
-    status: c_int,
+    pub state: child_state,
+    pub personality: c_int,
+    pub status: c_int,
     pub error: c_int,
-    forked_pid: c_ulong,
-    saved_syscall: c_ulong,
+    pub forked_pid: c_ulong,
+    pub saved_syscall: c_ulong,
     #[cfg(target_os = "linux")]
-    user: user
+    pub user: user
 }
 
 #[repr(C)]
@@ -69,8 +69,14 @@ extern {
     pub fn ptrace_syscall_numbers(child: *mut ptrace_child) -> *mut syscall_numbers;
     pub fn ptrace_memcpy_from_child(
         child: *mut ptrace_child,
-        data: *mut c_void,
-        addr: c_ulong,
+        dst: *mut c_void,
+        src: c_ulong,
+        size: usize
+    ) -> c_int;
+    pub fn ptrace_memcpy_to_child(
+        child: *mut ptrace_child,
+        from: c_ulong,
+        to: *mut c_void,
         size: usize
     ) -> c_int;
 }

@@ -26,54 +26,5 @@
 #include "../platform.h"
 #include "../../reptyr.h"
 #include "../../ptrace.h"
-#include <stdint.h>
-
-void move_process_group(struct ptrace_child *child, pid_t from, pid_t to) {
-    DIR *dir;
-    struct dirent *d;
-    pid_t pid;
-    char *p;
-    int err;
-
-    if ((dir = opendir("/proc/")) == NULL)
-        return;
-
-    while ((d = readdir(dir)) != NULL) {
-        if (d->d_name[0] == '.') continue;
-        pid = strtol(d->d_name, &p, 10);
-        if (*p) continue;
-        if (getpgid(pid) == from) {
-            debug("Change pgid for pid %d", pid);
-            err = do_syscall(child, setpgid, pid, to, 0, 0, 0, 0);
-            if (err < 0)
-                error(" failed: %s", strerror(-err));
-        }
-    }
-    closedir(dir);
-}
-
-void copy_user(struct ptrace_child *d, struct ptrace_child *s) {
-    memcpy(&d->user, &s->user, sizeof(s->user));
-}
-
-unsigned long ptrace_socketcall(struct ptrace_child *child,
-                                unsigned long scratch,
-                                unsigned long socketcall,
-                                unsigned long p0, unsigned long p1,
-                                unsigned long p2, unsigned long p3,
-                                unsigned long p4)
-{
-    // We assume that socketcall is only used on 32-bit
-    // architectures. If there are any 64-bit architectures that do
-    // socketcall, and we port to them, this will need to change.
-    uint32_t args[] = {p0, p1, p2, p3, p4};
-    int err;
-
-    err = ptrace_memcpy_to_child(child, scratch, &args, sizeof args);
-    if (err < 0)
-        return (unsigned long)err;
-    return do_syscall(child, socketcall, socketcall, scratch, 0, 0, 0, 0);
-}
-
 
 #endif
