@@ -27,8 +27,10 @@ use libc::{
   EINVAL,
   EOF,
   ENOMEM,
+  ENOTTY,
   ESRCH,
   getpgid,
+  isatty,
   lseek,
   major,
   minor,
@@ -52,6 +54,8 @@ use libc::{
   strlen,
   strncmp,
   strtol,
+  tcgetattr,
+  termios,
   uid_t
 };
 use std::fs::File;
@@ -548,4 +552,42 @@ pub unsafe extern fn find_master_fd(steal: *mut steal_pty_state) -> c_int {
 #[no_mangle]
 pub unsafe extern fn get_pt() -> c_int {
     open(cstr!("/dev/ptmx"), O_RDWR | O_NOCTTY)
+}
+
+#[no_mangle]
+pub unsafe extern fn get_process_tty_termios(pid: pid_t, tio: *mut termios) -> c_int {
+    let mut err = EINVAL;
+    let buf = ['\0' as c_char; PATH_MAX as usize];
+
+    for i in 0..3 {
+        if err != 0 {
+            err = 0;
+
+            debug(cstr!("checking fd to see if it's ptmx: %s"), i);
+
+            snprintf(
+                buf.as_ptr() as *mut i8,
+                PATH_MAX as usize,
+                cstr!("/proc/%d/fd/%d"),
+                pid,
+                i
+            );
+
+            let fd = open(buf.as_ptr(), O_RDONLY);
+
+            if fd < 0 {
+                err = -fd;
+            } else if isatty(fd) == 0 {
+                err = ENOTTY;
+                close(fd);
+                break;
+            } else if tcgetattr(fd, tio) < 0 {
+                err = -assert_nonzero!(errno().0);
+            }
+
+            close(fd);
+        }
+    }
+
+    return err;
 }

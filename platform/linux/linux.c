@@ -28,36 +28,6 @@
 #include "../../ptrace.h"
 #include <stdint.h>
 
-int get_process_tty_termios(pid_t pid, struct termios *tio) {
-    int err = EINVAL;
-    char buf[PATH_MAX];
-    int i;
-    int fd;
-
-    for (i = 0; i < 3 && err; i++) {
-        err = 0;
-        snprintf(buf, sizeof buf, "/proc/%d/fd/%d", pid, i);
-
-        if ((fd = open(buf, O_RDONLY)) < 0) {
-            err = -fd;
-            continue;
-        }
-
-        if (!isatty(fd)) {
-            err = ENOTTY;
-            goto retry;
-        }
-
-        if (tcgetattr(fd, tio) < 0) {
-            err = -assert_nonzero(errno);
-        }
-retry:
-        close(fd);
-    }
-
-    return err;
-}
-
 void move_process_group(struct ptrace_child *child, pid_t from, pid_t to) {
     DIR *dir;
     struct dirent *d;

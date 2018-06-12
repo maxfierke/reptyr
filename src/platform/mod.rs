@@ -27,6 +27,7 @@ use xreallocarray;
 const TASK_COMM_LENGTH: usize = 16;
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct fd_array {
     fds: *mut c_int,
     n: c_int,
@@ -44,6 +45,7 @@ impl Default for fd_array {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct proc_stat {
     pid: pid_t,
     comm: [c_char; TASK_COMM_LENGTH+1],
@@ -69,12 +71,14 @@ impl Default for proc_stat {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 union SockAddrUnion {
   addr: sockaddr,
   addr_un: sockaddr_un
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct steal_pty_state {
     target_stat: proc_stat,
 

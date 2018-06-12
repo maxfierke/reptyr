@@ -11,6 +11,7 @@ use libc::{
 
 #[repr(C)]
 #[allow(non_camel_case_types)]
+#[derive(Copy, Clone)]
 pub enum child_state {
     ptrace_detached = 0,
     ptrace_at_syscall,
@@ -21,6 +22,7 @@ pub enum child_state {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct ptrace_child {
     pub pid: pid_t,
     state: child_state,
@@ -34,6 +36,7 @@ pub struct ptrace_child {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct syscall_numbers {
     pub nr_mmap: c_long,
     pub nr_mmap2: c_long,

@@ -80,7 +80,7 @@ extern int *get_child_tty_fds(struct ptrace_child *child, int statfd, int *count
 extern int get_terminal_state(struct steal_pty_state *steal, pid_t target);
 extern int find_master_fd(struct steal_pty_state *steal);
 extern int get_pt();
-int get_process_tty_termios(pid_t pid, struct termios *tio);
+extern int get_process_tty_termios(pid_t pid, struct termios *tio);
 void move_process_group(struct ptrace_child *child, pid_t from, pid_t to);
 void copy_user(struct ptrace_child *d, struct ptrace_child *s);
 
