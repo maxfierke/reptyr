@@ -232,7 +232,10 @@ void move_process_group(struct ptrace_child *child, pid_t from, pid_t to) {
 
     for (i = 0; i < cnt; i++) {
         debug("Change pgid for pid %d to %d", kp[i].ki_pid, to);
-        err = do_syscall(child, setpgid, kp[i].ki_pid, to, 0, 0, 0, 0);
+        err = ptrace_remote_syscall(
+            child,
+            ptrace_syscall_numbers(child)->nr_setpgid,
+            kp[i].ki_pid, to, 0, 0, 0, 0);
         if (err < 0)
             error(" failed: %s", strerror(-err));
     }

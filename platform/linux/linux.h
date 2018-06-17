@@ -76,7 +76,9 @@ extern unsigned long ptrace_socketcall(struct ptrace_child *child,
     ({                                                                  \
         int __ret;                                                      \
         if (ptrace_syscall_numbers((child))->nr_##name) {               \
-            __ret = do_syscall((child), name, a0, a1, a2, a3, a4, 0);   \
+            __ret = ptrace_remote_syscall((child), \
+                        ptrace_syscall_numbers((child))->nr_##name, \
+                        a0, a1, a2, a3, a4, 0); \
         } else {                                                        \
             __ret = ptrace_socketcall((child), (scratch),               \
                                       socketcall_##name,                \

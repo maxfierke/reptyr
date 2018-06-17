@@ -48,14 +48,19 @@
 static void do_unmap(struct ptrace_child *child, child_addr_t addr, unsigned long len) {
     if (addr == (child_addr_t) - 1)
         return;
-    do_syscall(child, munmap, (unsigned long)addr, len, 0, 0, 0, 0);
+    ptrace_remote_syscall(
+        child,
+        ptrace_syscall_numbers(child)->nr_munmap,
+        (unsigned long) addr, len, 0, 0, 0, 0);
 }
 
 int do_setsid(struct ptrace_child *child) {
     int err = 0;
     struct ptrace_child dummy;
 
-    err = do_syscall(child, fork, 0, 0, 0, 0, 0, 0);
+    err = ptrace_remote_syscall(
+        child,
+        ptrace_syscall_numbers(child)->nr_fork, 0, 0, 0, 0, 0, 0);
     if (err < 0)
         return err;
 
@@ -72,7 +77,9 @@ int do_setsid(struct ptrace_child *child) {
         goto out_kill;
     }
 
-    err = do_syscall(&dummy, setpgid, 0, 0, 0, 0, 0, 0);
+    err = ptrace_remote_syscall(
+        &dummy,
+        ptrace_syscall_numbers(&dummy)->nr_setpgid, 0, 0, 0, 0, 0, 0);
     if (err < 0) {
         error("Failed to setpgid: %s", strerror(-err));
         goto out_kill;
@@ -80,7 +87,9 @@ int do_setsid(struct ptrace_child *child) {
 
     move_process_group(child, child->pid, dummy.pid);
 
-    err = do_syscall(child, setsid, 0, 0, 0, 0, 0, 0);
+    err = ptrace_remote_syscall(
+        child,
+        ptrace_syscall_numbers(child)->nr_setsid, 0, 0, 0, 0, 0, 0);
     if (err < 0) {
         error("Failed to setsid: %s", strerror(-err));
         move_process_group(child, dummy.pid, child->pid);
@@ -93,7 +102,8 @@ out_kill:
     kill(dummy.pid, SIGKILL);
     ptrace_detach_child(&dummy);
     //ptrace_wait(&dummy);
-    do_syscall(child, wait4, dummy.pid, 0, WNOHANG, 0, 0, 0);
+    ptrace_remote_syscall(child, ptrace_syscall_numbers(child)->nr_wait4,
+                          dummy.pid, 0, WNOHANG, 0, 0, 0);
     return err;
 }
 
@@ -107,9 +117,10 @@ int ignore_hup(struct ptrace_child *child, child_addr_t scratch_page) {
                                  &act, sizeof act);
     if (err < 0)
         return err;
-    err = do_syscall(child, rt_sigaction,
-                     SIGHUP, (unsigned long)scratch_page,
-                     0, 8, 0, 0);
+    err = ptrace_remote_syscall(child,
+            ptrace_syscall_numbers(child)->nr_rt_sigaction,
+            SIGHUP,
+            (unsigned long) scratch_page, 0, 8, 0, 0);
 
     return err;
 }
@@ -298,9 +309,9 @@ int attach_child(pid_t pid, const char *pty, int force_stdio) {
         goto out_free_fds;
     }
 
-    child_fd = do_syscall(&child, open,
-                          scratch_page, O_RDWR | O_NOCTTY,
-                          0, 0, 0, 0);
+    child_fd = ptrace_remote_syscall(&child,
+        ptrace_syscall_numbers(&child)->nr_open,
+        scratch_page, O_RDWR | O_NOCTTY, 0, 0, 0, 0);
     if (child_fd < 0) {
         err = child_fd;
         error("Unable to open the tty in the child.");
@@ -313,17 +324,25 @@ int attach_child(pid_t pid, const char *pty, int force_stdio) {
     if (err < 0)
         goto out_close;
 
-    err = do_syscall(&child, getsid, 0, 0, 0, 0, 0, 0);
+    err = ptrace_remote_syscall(
+        &child,
+        ptrace_syscall_numbers(&child)->nr_getsid, 0, 0, 0, 0, 0, 0);
     if (err != child.pid) {
         debug("Target is not a session leader, attempting to setsid.");
         err = do_setsid(&child);
     } else {
-        do_syscall(&child, ioctl, child_tty_fds[0], TIOCNOTTY, 0, 0, 0, 0);
+        ptrace_remote_syscall(
+            &child,
+            ptrace_syscall_numbers(&child)->nr_ioctl,
+            child_tty_fds[0], TIOCNOTTY, 0, 0, 0, 0);
     }
     if (err < 0)
         goto out_close;
 
-    err = do_syscall(&child, ioctl, child_fd, TIOCSCTTY, 1, 0, 0, 0);
+    err = ptrace_remote_syscall(
+        &child,
+        ptrace_syscall_numbers(&child)->nr_ioctl,
+        child_fd, TIOCSCTTY, 1, 0, 0, 0);
     if (err != 0) { /* Seems to be returning >0 for error */
         error("Unable to set controlling terminal: %s", strerror(err));
         goto out_close;
@@ -332,7 +351,10 @@ int attach_child(pid_t pid, const char *pty, int force_stdio) {
     debug("Set the controlling tty");
 
     for (i = 0; i < n_fds; i++) {
-        err = do_syscall(&child, dup2, child_fd, child_tty_fds[i], 0, 0, 0, 0);
+        err = ptrace_remote_syscall(
+            &child,
+            ptrace_syscall_numbers(&child)->nr_dup2,
+            child_fd, child_tty_fds[i], 0, 0, 0, 0);
         if (err < 0)
             error("Problem moving child fd number %d to new tty: %s", child_tty_fds[i], strerror(errno));
     }
@@ -341,7 +363,10 @@ int attach_child(pid_t pid, const char *pty, int force_stdio) {
     err = 0;
 
 out_close:
-    do_syscall(&child, close, child_fd, 0, 0, 0, 0, 0);
+    ptrace_remote_syscall(
+        &child,
+        ptrace_syscall_numbers(&child)->nr_close,
+        child_fd, 0, 0, 0, 0, 0);
 out_free_fds:
     free(child_tty_fds);
 
@@ -504,18 +529,30 @@ int steal_cleanup_child(struct steal_pty_state *steal) {
         return steal->child.error;
     }
 
-    int nullfd = do_syscall(&steal->child, open, steal->child_scratch, O_RDWR, 0, 0, 0, 0);
+    int nullfd = ptrace_remote_syscall(
+        &steal->child,
+        ptrace_syscall_numbers(&steal->child)->nr_open,
+        steal->child_scratch, O_RDWR, 0, 0, 0, 0);
     if (nullfd < 0) {
         return steal->child.error;
     }
 
     int i;
     for (i = 0; i < steal->master_fds.n; ++i) {
-        do_syscall(&steal->child, dup2, nullfd, steal->master_fds.fds[i], 0, 0, 0, 0);
+        ptrace_remote_syscall(
+            &steal->child,
+            ptrace_syscall_numbers(&steal->child)->nr_dup2,
+            nullfd, steal->master_fds.fds[i], 0, 0, 0, 0);
     }
 
-    do_syscall(&steal->child, close, nullfd, 0, 0, 0, 0, 0);
-    do_syscall(&steal->child, close, steal->child_fd, 0, 0, 0, 0, 0);
+    ptrace_remote_syscall(
+        &steal->child,
+        ptrace_syscall_numbers(&steal->child)->nr_close,
+        nullfd, 0, 0, 0, 0, 0);
+    ptrace_remote_syscall(
+        &steal->child,
+        ptrace_syscall_numbers(&steal->child)->nr_close,
+        steal->child_fd, 0, 0, 0, 0, 0);
 
     steal->child_fd = 0;
 
@@ -574,7 +611,10 @@ out:
     }
 
     if (steal.child_fd > 0)
-        do_syscall(&steal.child, close, steal.child_fd, 0, 0, 0, 0, 0);
+        ptrace_remote_syscall(
+            &steal.child,
+            ptrace_syscall_numbers(&steal.child)->nr_close,
+            steal.child_fd, 0, 0, 0, 0, 0);
 
     if (steal.child_scratch > 0)
         do_unmap(&steal.child, steal.child_scratch, page_size);

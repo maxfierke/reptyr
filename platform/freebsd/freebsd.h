@@ -43,7 +43,9 @@
     ({                                                                  \
         int __ret=-1;                                                   \
         if (ptrace_syscall_numbers((child))->nr_##name) {               \
-            __ret = do_syscall((child), name, a0, a1, a2, a3, a4, 0);   \
+            __ret = ptrace_remote_syscall((child), \
+                        ptrace_syscall_numbers((child))->nr_##name, \
+                        a0, a1, a2, a3, a4, 0); \
         }                                                               \
         __ret; })
 
