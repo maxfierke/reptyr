@@ -1,4 +1,6 @@
 extern crate libc;
+extern crate nix;
+extern crate procinfo;
 
 use ptrace::{
     ptrace_memcpy_from_child,
@@ -27,13 +29,11 @@ use libc::{
   closedir,
   DIR,
   EINVAL,
-  EOF,
   ENOMEM,
   ENOTTY,
   ESRCH,
   getpgid,
   isatty,
-  lseek,
   major,
   minor,
   makedev,
@@ -48,7 +48,6 @@ use libc::{
   pid_t,
   read,
   readdir,
-  SEEK_SET,
   snprintf,
   sscanf,
   stat,
@@ -61,6 +60,7 @@ use libc::{
   uid_t
 };
 use std::fs::File;
+use std::io::Error;
 use std::io::prelude::*;
 use std::mem;
 use std::ptr;
@@ -90,58 +90,28 @@ pub extern fn check_ptrace_scope() -> () {
 }
 
 #[no_mangle]
-pub unsafe extern fn parse_proc_stat(statfd: c_int, out: *mut proc_stat) -> c_int {
-    let buf: [c_char; 1024] = ['\0' as c_char; 1024];
-    let dev: u64 = 0;
+pub extern fn read_proc_stat(pid: pid_t, out: &mut proc_stat) -> Result<proc_stat, Error> {
+    let process_proc_stat = match procinfo::pid::stat(pid) {
+        Err(err) => return Err(err),
+        Ok(stat) => stat,
+    };
 
-    lseek(statfd, 0, SEEK_SET);
-    if read(statfd, buf.as_ptr() as *mut c_void, 1024) < 0 {
-        return assert_nonzero!(errno().0);
-    }
+    // TODO: Do this less gross. Macro maybe?
+    let mut command = process_proc_stat.command.into_bytes();
+    command.resize(TASK_COMM_LENGTH+1, 0);
+    let mut comm: [u8; TASK_COMM_LENGTH+1] = Default::default();
+    comm.copy_from_slice(command.as_slice());
+    comm[TASK_COMM_LENGTH] = '\0' as u8;
 
-    let n = sscanf(&buf as *const i8,
-        cstr!("%d (%16[^)]) %c %d %d %d %hu"),
-        &(*out).pid,
-        (*out).comm.as_ptr(),
-        &(*out).state,
-        &(*out).ppid,
-        &(*out).pgid,
-        &(*out).sid,
-        &dev
-    );
+    out.pid = process_proc_stat.pid;
+    out.comm = comm;
+    out.state = process_proc_stat.state as u8;
+    out.ppid = process_proc_stat.ppid;
+    out.pgid = process_proc_stat.pgrp;
+    out.sid = process_proc_stat.session;
+    out.ctty = process_proc_stat.tty_nr as u64;
 
-    if n == EOF {
-        return assert_nonzero!(errno().0);
-    }
-    if n != 7 {
-        return EINVAL;
-    }
-    (*out).ctty = dev;
-
-    return 0;
-}
-
-#[no_mangle]
-pub unsafe extern fn read_proc_stat(pid: pid_t, out: *mut proc_stat) -> c_int {
-    let stat_path = ['\0' as c_char; PATH_MAX as usize];
-    let statfd: c_int;
-    let err: c_int;
-
-    snprintf(
-        stat_path.as_ptr() as *mut i8,
-        PATH_MAX as usize,
-        cstr!("/proc/%d/stat"),
-        pid
-    );
-    statfd = open(stat_path.as_ptr() as *mut i8, O_RDONLY);
-    if statfd < 0 {
-        error(cstr!("Unable to open %s: %s"), stat_path, strerror(errno().0));
-        return -statfd;
-    }
-    err = parse_proc_stat(statfd, out);
-
-    close(statfd);
-    return err;
+    Ok(*out)
 }
 
 #[no_mangle]
@@ -231,11 +201,7 @@ pub unsafe extern fn check_pgroup(target: pid_t) -> c_int {
 
         let pid = strtol((*d).d_name.as_ptr(), &mut p as *mut *mut c_char, 10);
 
-        if p.is_null() {
-            // Noop
-        } else if (*p) != 0 {
-            // Noop
-        } else if pid == target.into() {
+        if p.is_null() || (*p) != 0 || pid == target.into() {
             // Noop
         } else if getpgid(pid as i32) == pg {
             /*
@@ -245,7 +211,7 @@ pub unsafe extern fn check_pgroup(target: pid_t) -> c_int {
              * is a fairly rare case, and annoying to check for, so
              * for now let's just bail out.
              */
-            if read_proc_stat(pid as i32, &mut pid_stat as *mut proc_stat) != 0 {
+            if read_proc_stat(pid as i32, &mut pid_stat).is_ok() {
                 memcpy(
                     pid_stat.comm.as_ptr() as *mut c_void,
                     cstr!("???") as *mut c_void,
@@ -272,7 +238,7 @@ pub unsafe extern fn check_pgroup(target: pid_t) -> c_int {
 }
 
 #[no_mangle]
-pub unsafe extern fn get_child_tty_fds(child: *mut ptrace_child, statfd: c_int, count: *mut c_int) -> *mut c_int {
+pub unsafe extern fn get_child_tty_fds(child: *mut ptrace_child, _statfd: c_int, count: *mut c_int) -> *mut c_int {
     let mut child_status: proc_stat = Default::default();
     let mut tty_st: stat = mem::zeroed();
     let mut console_st: stat = mem::zeroed();
@@ -282,10 +248,11 @@ pub unsafe extern fn get_child_tty_fds(child: *mut ptrace_child, statfd: c_int, 
 
     debug(cstr!("Looking up fds for tty in child."));
 
-    (*child).error = parse_proc_stat(statfd, &mut child_status);
-
-    if (*child).error != 0 {
+    if let Err(err) = read_proc_stat((*child).pid, &mut child_status) {
+        (*child).error = err.raw_os_error().unwrap();
         return 0 as *mut c_int;
+    } else {
+        (*child).error = 0;
     }
 
     debug(cstr!("Resolved child tty: %x"), child_status.ctty);
@@ -369,13 +336,11 @@ pub unsafe extern fn find_terminal_emulator(steal: *mut steal_pty_state) -> c_in
         (*steal).target_stat.pid as c_int,
         (*steal).target_stat.sid as c_int
     );
-    let mut leader_st: proc_stat = Default::default();
-
-    let err = read_proc_stat((*steal).target_stat.sid, &mut leader_st as *mut proc_stat);
-
-    if err != 0 {
-        return err;
-    }
+    let parent_pid = (*steal).target_stat.sid;
+    let leader_st = match procinfo::pid::stat(parent_pid) {
+        Err(err) => return err.raw_os_error().unwrap(),
+        Ok(stat) => stat,
+    };
 
     debug(cstr!("found terminal emulator process: %d"), leader_st.ppid as c_int);
 
@@ -385,26 +350,23 @@ pub unsafe extern fn find_terminal_emulator(steal: *mut steal_pty_state) -> c_in
 }
 
 #[no_mangle]
-pub unsafe extern fn check_proc_stopped(_pid: pid_t, fd: c_int) -> c_int {
-    let mut st: proc_stat = Default::default();
+pub extern fn check_proc_stopped(pid: pid_t, _fd: c_int) -> c_int {
+    let st = match procinfo::pid::stat(pid) {
+        Err(_) => return 1,
+        Ok(stat) => stat,
+    };
 
-    if parse_proc_stat(fd, &mut st) != 0 {
+    if st.state == procinfo::pid::State::TraceStopped {
         return 1;
     }
 
-    if (st.state as u8 as char) == 'T' {
-        return 1;
-    }
-
-    return 0;
+    0
 }
 
 #[no_mangle]
 pub unsafe extern fn get_terminal_state(steal: *mut steal_pty_state, target: pid_t) -> c_int {
-    let mut err = read_proc_stat(target, &mut (*steal).target_stat);
-
-    if err != 0 {
-        return err;
+    if let Err(err) = read_proc_stat(target, &mut (*steal).target_stat) {
+        return err.raw_os_error().unwrap();
     }
 
     if major((*steal).target_stat.ctty) != UNIX98_PTY_SLAVE_MAJOR {
@@ -412,7 +374,7 @@ pub unsafe extern fn get_terminal_state(steal: *mut steal_pty_state, target: pid
         return EINVAL;
     }
 
-    err = find_terminal_emulator(steal);
+    let mut err = find_terminal_emulator(steal);
 
     if err != 0 {
         return err;
@@ -613,9 +575,7 @@ pub unsafe extern fn move_process_group(child: *mut ptrace_child, from: pid_t, t
 
         let pid = strtol((*d).d_name.as_ptr(), &mut p as *mut *mut c_char, 10);
 
-        if p.is_null() {
-            // Noop
-        } else if (*p) != 0 {
+        if p.is_null() || (*p) != 0 {
             // Noop
         } else if getpgid(pid as i32) == from {
             debug(cstr!("Change pgid for pid %d"), pid);

@@ -45,11 +45,11 @@ impl Default for fd_array {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct proc_stat {
     pid: pid_t,
-    comm: [c_char; TASK_COMM_LENGTH+1],
-    state: c_char,
+    comm: [u8; TASK_COMM_LENGTH+1],
+    state: u8,
     ppid: pid_t,
     sid: pid_t,
     pgid: pid_t,
@@ -60,8 +60,8 @@ impl Default for proc_stat {
     fn default() -> proc_stat {
         proc_stat {
             pid: 0,
-            comm: ['\0' as c_char; TASK_COMM_LENGTH+1],
-            state: '\0' as c_char,
+            comm: ['\0' as u8; TASK_COMM_LENGTH+1],
+            state: 0,
             ppid: 0,
             sid: 0,
             pgid: 0,
