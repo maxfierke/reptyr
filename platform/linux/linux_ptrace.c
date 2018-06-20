@@ -225,21 +225,38 @@ long ptrace_remote_syscall(struct ptrace_child *child,
     if (ptrace_advance_to_state(child, ptrace_at_syscall) < 0)
         return -1;
 
-#define setreg(r, v) do {                                               \
-        if (ptrace_command(child, PTRACE_POKEUSER,                      \
-                           personality(child)->r,                       \
-                           (v)) < 0)                                    \
-            return -1;                                                  \
-    } while (0)
-
     if (arch_set_syscall(child, sysno) < 0)
         return -1;
-    setreg(syscall_arg0, p0);
-    setreg(syscall_arg1, p1);
-    setreg(syscall_arg2, p2);
-    setreg(syscall_arg3, p3);
-    setreg(syscall_arg4, p4);
-    setreg(syscall_arg5, p5);
+
+    if (ptrace_command(child, PTRACE_POKEUSER,
+        personality(child)->syscall_arg0, p0) < 0) {
+        return -1;
+    }
+
+    if (ptrace_command(child, PTRACE_POKEUSER,
+        personality(child)->syscall_arg1, p1) < 0) {
+        return -1;
+    }
+
+    if (ptrace_command(child, PTRACE_POKEUSER,
+        personality(child)->syscall_arg2, p2) < 0) {
+        return -1;
+    }
+
+    if (ptrace_command(child, PTRACE_POKEUSER,
+        personality(child)->syscall_arg3, p3) < 0) {
+        return -1;
+    }
+
+    if (ptrace_command(child, PTRACE_POKEUSER,
+        personality(child)->syscall_arg4, p4) < 0) {
+        return -1;
+    }
+
+    if (ptrace_command(child, PTRACE_POKEUSER,
+        personality(child)->syscall_arg5, p5) < 0) {
+        return -1;
+    }
 
     if (ptrace_advance_to_state(child, ptrace_after_syscall) < 0)
         return -1;
@@ -249,10 +266,12 @@ long ptrace_remote_syscall(struct ptrace_child *child,
     if (child->error)
         return -1;
 
-    setreg(reg_ip, *(unsigned long*)((void*)&child->user +
-                                     personality(child)->reg_ip));
-
-#undef setreg
+    if (ptrace_command(child, PTRACE_POKEUSER,
+        personality(child)->reg_ip,
+        *(unsigned long*)((void*)&child->user + personality(child)->reg_ip)
+    ) < 0) {
+        return -1;
+    }
 
     return rv;
 }
