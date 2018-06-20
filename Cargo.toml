@@ -6,6 +6,7 @@ authors = ["Max Fierke <max@maxfierke.com>"]
 [dependencies]
 errno = "*"
 libc = "*"
+nix = "0.11.0"
 
 [lib]
 crate-type = ["staticlib"]
