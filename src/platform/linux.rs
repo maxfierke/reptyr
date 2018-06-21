@@ -37,7 +37,6 @@ use libc::{
   major,
   minor,
   makedev,
-  memchr,
   memcpy,
   O_NOCTTY,
   O_RDONLY,
@@ -46,18 +45,13 @@ use libc::{
   opendir,
   PATH_MAX,
   pid_t,
-  read,
   readdir,
   snprintf,
-  sscanf,
   stat,
   strerror,
-  strlen,
-  strncmp,
   strtol,
   tcgetattr,
   termios,
-  uid_t
 };
 use std::fs::File;
 use std::io::Error;
@@ -115,60 +109,18 @@ pub extern fn read_proc_stat(pid: pid_t, out: &mut proc_stat) -> Result<proc_sta
 }
 
 #[no_mangle]
-pub unsafe extern fn read_uid(pid: pid_t, out: *mut uid_t) -> c_int {
-    let buf = ['\0' as c_char; 1024];
-    let mut p = buf.as_ptr() as *mut i8;
-    let stat_path = ['\0' as c_char; PATH_MAX as usize];
-    let statfd: c_int;
-    let err: c_int = 0;
+pub extern fn read_uid(pid: pid_t) -> Result<u32, Error> {
+    let status = match procinfo::pid::status(pid) {
+        Err(err) => {
+            // FIXME: This doesn't _seem_ right, but it seems to mirror the C
+            // functionality & behavior, so revisit if there's something funky
+            unsafe { debug(cstr!("Unable to parse emulator uid: no Uid line found")); }
+            return Err(err);
+        },
+        Ok(st) => st
+    };
 
-    snprintf(
-        stat_path.as_ptr() as *mut i8,
-        PATH_MAX as usize,
-        cstr!("/proc/%d/status"),
-        pid
-    );
-
-    statfd = open(stat_path.as_ptr() as *mut i8, O_RDONLY);
-    if statfd < 0 {
-        error(cstr!("Unable to open %s: %s"), stat_path, strerror(errno().0));
-        return -statfd;
-    }
-
-    let n = read(statfd, buf.as_ptr() as *mut c_void, 1024);
-
-    if n < 0 {
-        close(statfd);
-        return assert_nonzero!(errno().0);
-    }
-
-    while *p < *buf.as_ptr().offset(n) {
-        if strncmp(p, cstr!("Uid:\t"), strlen(cstr!("Uid:\t"))) == 0 {
-            break;
-        }
-        p = memchr(
-            p as *const c_void,
-            '\n' as c_int,
-            (*buf.as_ptr().offset(n) - *p) as usize
-        ) as *mut i8;
-        if p.is_null() {
-            break;
-        }
-        *p += 1;
-    }
-
-    if p.is_null() || *p >= *buf.as_ptr().offset(n) {
-        debug(cstr!("Unable to parse emulator uid: no Uid line found"));
-        *out = u32::max_value();
-        close(statfd);
-        return err;
-    }
-    if sscanf(p, cstr!("Uid:\t%d"), out) < 0 {
-        debug(cstr!("Unable to parse emulator uid: unparseable Uid line"));
-    }
-
-    close(statfd);
-    return err;
+    Ok(status.uid_real)
 }
 
 #[no_mangle]
@@ -330,23 +282,22 @@ pub unsafe extern fn get_child_tty_fds(child: *mut ptrace_child, _statfd: c_int,
 // construct situations where it is false. We should fail safe later
 // on if this turns out to be wrong, however.
 #[no_mangle]
-pub unsafe extern fn find_terminal_emulator(steal: *mut steal_pty_state) -> c_int {
-    debug(
-        cstr!("session leader of pid %d = %d"),
-        (*steal).target_stat.pid as c_int,
-        (*steal).target_stat.sid as c_int
+pub extern fn find_terminal_emulator(steal: &mut steal_pty_state) -> Result<&steal_pty_state, Error> {
+    println!("[+] session leader of pid {} = {}",
+        steal.target_stat.pid,
+        steal.target_stat.sid
     );
-    let parent_pid = (*steal).target_stat.sid;
+    let parent_pid = steal.target_stat.sid;
     let leader_st = match procinfo::pid::stat(parent_pid) {
-        Err(err) => return err.raw_os_error().unwrap(),
+        Err(err) => return Err(err),
         Ok(stat) => stat,
     };
 
-    debug(cstr!("found terminal emulator process: %d"), leader_st.ppid as c_int);
+    println!("[+] found terminal emulator process: {}", leader_st.ppid);
 
-    (*steal).emulator_pid = leader_st.ppid;
+    steal.emulator_pid = leader_st.ppid;
 
-    0
+    Ok(steal)
 }
 
 #[no_mangle]
@@ -374,15 +325,18 @@ pub unsafe extern fn get_terminal_state(steal: *mut steal_pty_state, target: pid
         return EINVAL;
     }
 
-    let mut err = find_terminal_emulator(steal);
-
-    if err != 0 {
-        return err;
+    if let Err(err) = find_terminal_emulator(&mut (*steal)) {
+        return err.raw_os_error().unwrap();
     }
 
-    err = read_uid((*steal).emulator_pid, &mut (*steal).emulator_uid);
+    let uid = match read_uid((*steal).emulator_pid) {
+        Err(err) => return err.raw_os_error().unwrap_or(0),
+        Ok(uid_real) => uid_real
+    };
 
-    err
+    (*steal).emulator_uid = uid;
+
+    0
 }
 
 // Find the fd(s) in the terminal emulator process that corresponds to
