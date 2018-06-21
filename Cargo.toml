@@ -7,6 +7,7 @@ authors = ["Max Fierke <max@maxfierke.com>"]
 errno = "*"
 libc = "*"
 nix = "0.11.0"
+walkdir = "2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procinfo = "0.4.2"

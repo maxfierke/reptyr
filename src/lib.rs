@@ -19,6 +19,21 @@ mod macros {
             concat!($s, "\0") as *const str as *const [c_char] as *const c_char
         );
     }
+
+    macro_rules! reptyr_error {
+        ($s:expr, $($x:tt)*) => {
+            println!(concat!("[!] ", $s), $($x)*);
+        };
+    }
+
+    macro_rules! reptyr_debug {
+        ($s:expr) => {
+            println!(concat!("[+] ", $s));
+        };
+        ($s:expr, $($x:tt)*) => {
+            println!(concat!("[+] ", $s), $($x)*);
+        };
+    }
 }
 
 pub mod platform;

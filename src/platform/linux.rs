@@ -1,6 +1,7 @@
 extern crate libc;
 extern crate nix;
 extern crate procinfo;
+extern crate walkdir;
 
 use ptrace::{
     ptrace_memcpy_from_child,
@@ -56,12 +57,23 @@ use libc::{
 use std::fs::File;
 use std::io::Error;
 use std::io::prelude::*;
-use std::mem;
-use std::ptr;
+use std::{mem, ptr, str};
+use self::walkdir::{DirEntry, WalkDir};
 
 // From #include <linux/major.h>
 // Defined as UNIX98_PTY_MASTER_MAJOR + UNIX98_PTY_MAJOR_COUNT
 const UNIX98_PTY_SLAVE_MAJOR: u32 = 128 + 8;
+
+fn is_hidden(entry: &DirEntry) -> bool {
+    entry.file_name()
+         .to_str()
+         .map(|s| s.starts_with("."))
+         .unwrap_or(false)
+}
+
+fn is_depth_one(entry: &DirEntry) -> bool {
+    entry.depth() <= 1
+}
 
 #[no_mangle]
 pub extern fn check_ptrace_scope() -> () {
@@ -124,38 +136,25 @@ pub extern fn read_uid(pid: pid_t) -> Result<u32, Error> {
 }
 
 #[no_mangle]
-pub unsafe extern fn check_pgroup(target: pid_t) -> c_int {
-    let mut p = ptr::null::<c_char>() as *mut c_char;
+pub extern fn check_pgroup(target: pid_t) -> c_int {
     let mut err: c_int = 0;
     let mut pid_stat: proc_stat = Default::default();
 
-    debug(cstr!("Checking for problematic process group members..."));
+    reptyr_debug!("Checking for problematic process group members...");
 
-    let pg: pid_t = getpgid(target);
+    let pg: pid_t = unsafe { getpgid(target) };
     if pg < 0 {
-        error(cstr!("Unable to get pgid for pid %d"), target as c_int);
+        reptyr_error!("Unable to get pgid for pid {}", target);
         return errno().0;
     }
 
-    let dir: *mut DIR = opendir(cstr!("/proc/"));
+    let proc_dir = WalkDir::new("/proc/").into_iter()
+        .filter_entry(|e| is_depth_one(e) && !is_hidden(e))
+        .filter_map(|e| e.ok());
+    for proc_entry in proc_dir {
+        let pid = proc_entry.file_name().to_str().unwrap().parse::<i32>().unwrap_or(-1);
 
-    if dir.is_null() {
-        return assert_nonzero!(errno().0);
-    }
-
-    let mut d = readdir(dir);
-
-    while !d.is_null() {
-        if (*d).d_name[0] == ('.' as i8) {
-            d = readdir(dir);
-            continue;
-        }
-
-        let pid = strtol((*d).d_name.as_ptr(), &mut p as *mut *mut c_char, 10);
-
-        if p.is_null() || (*p) != 0 || pid == target.into() {
-            // Noop
-        } else if getpgid(pid as i32) == pg {
+        if pid != target.into() && unsafe { getpgid(pid) } == pg {
             /*
              * We are actually being somewhat overly-conservative here
              * -- if pid is a child of target, and has not yet called
@@ -163,29 +162,27 @@ pub unsafe extern fn check_pgroup(target: pid_t) -> c_int {
              * is a fairly rare case, and annoying to check for, so
              * for now let's just bail out.
              */
-            if read_proc_stat(pid as i32, &mut pid_stat).is_ok() {
-                memcpy(
-                    pid_stat.comm.as_ptr() as *mut c_void,
-                    cstr!("???") as *mut c_void,
-                    4
-                );
+            if read_proc_stat(pid, &mut pid_stat).is_ok() {
+                unsafe {
+                    memcpy(
+                        pid_stat.comm.as_ptr() as *mut c_void,
+                        cstr!("???") as *mut c_void,
+                        4
+                    );
+                }
             }
-            error(
-                cstr!("Process %d (%.*s) shares %d's process group. Unable to attach.\n(This most commonly means that %d has sub-processes)."),
+            reptyr_error!(
+                "Process {} ({}) shares {}'s process group. Unable to attach.\n(This most commonly means that {} has sub-processes).",
                 pid as c_int,
-                TASK_COMM_LENGTH,
-                pid_stat.comm,
+                str::from_utf8(&pid_stat.comm).unwrap_or("NOCOMM"),
                 target as c_int,
                 target as c_int
             );
             err = EINVAL;
             break;
         }
-
-        d = readdir(dir);
     }
 
-    closedir(dir);
     return err;
 }
 
