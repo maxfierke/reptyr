@@ -49,15 +49,13 @@ use libc::{
   readdir,
   snprintf,
   stat,
-  strerror,
-  strtol,
   tcgetattr,
   termios,
 };
 use std::fs::File;
 use std::io::Error;
 use std::io::prelude::*;
-use std::{mem, ptr, str};
+use std::{mem, str};
 use self::walkdir::{DirEntry, WalkDir};
 
 // From #include <linux/major.h>
@@ -126,7 +124,7 @@ pub extern fn read_uid(pid: pid_t) -> Result<u32, Error> {
         Err(err) => {
             // FIXME: This doesn't _seem_ right, but it seems to mirror the C
             // functionality & behavior, so revisit if there's something funky
-            unsafe { debug(cstr!("Unable to parse emulator uid: no Uid line found")); }
+            reptyr_debug!("Unable to parse emulator uid: no Uid line found");
             return Err(err);
         },
         Ok(st) => st
@@ -195,7 +193,7 @@ pub unsafe extern fn get_child_tty_fds(child: *mut ptrace_child, _statfd: c_int,
     let buf = ['\0' as c_char; PATH_MAX as usize];
     let mut fds: fd_array = Default::default();
 
-    debug(cstr!("Looking up fds for tty in child."));
+    reptyr_debug!("Looking up fds for tty in child.");
 
     if let Err(err) = read_proc_stat((*child).pid, &mut child_status) {
         (*child).error = err.raw_os_error().unwrap();
@@ -384,7 +382,7 @@ pub unsafe extern fn find_master_fd(steal: *mut steal_pty_state) -> c_int {
         );
 
         if stat(buf.as_ptr(), &mut st) < 0 {
-            debug(cstr!("Couldn't stat. Skipping to the next FD."));
+            reptyr_debug!("Couldn't stat. Skipping to the next FD.");
             d = readdir(dir);
             continue;
         }
@@ -396,11 +394,10 @@ pub unsafe extern fn find_master_fd(steal: *mut steal_pty_state) -> c_int {
         );
 
         if st.st_rdev != ptmx_device {
-            debug(cstr!("Not a ptmx. Skipping to the next FD."));
+            reptyr_debug!("Not a ptmx. Skipping to the next FD.");
             d = readdir(dir);
             continue;
         }
-
 
         debug(cstr!("found a ptmx fd: %s"), (*d).d_name.as_ptr());
 
@@ -423,12 +420,12 @@ pub unsafe extern fn find_master_fd(steal: *mut steal_pty_state) -> c_int {
         );
 
         if err < 0 {
-            debug(cstr!("Error doing TIOCGPTN: %s"), strerror(-err as i32));
+            reptyr_debug!("Error doing TIOCGPTN: {}", -err as i32);
             d = readdir(dir);
             continue;
         }
 
-        debug(cstr!("TIOCGPTN succeeded."));
+        reptyr_debug!("TIOCGPTN succeeded.");
 
         let mut ptn: c_int = mem::zeroed();
 
@@ -440,7 +437,7 @@ pub unsafe extern fn find_master_fd(steal: *mut steal_pty_state) -> c_int {
         ).into();
 
         if err < 0 {
-            debug(cstr!(" error getting ptn: %s"), strerror(child.error));
+            reptyr_debug!(" error getting ptn: {}", child.error);
             d = readdir(dir);
             continue;
         }
@@ -508,50 +505,35 @@ pub unsafe extern fn get_process_tty_termios(pid: pid_t, tio: *mut termios) -> c
 }
 
 #[no_mangle]
-pub unsafe extern fn move_process_group(child: *mut ptrace_child, from: pid_t, to: pid_t) -> () {
-    let mut p = ptr::null::<c_char>() as *mut c_char;
-    let dir: *mut DIR = opendir(cstr!("/proc/"));
+pub extern fn move_process_group(child: *mut ptrace_child, from: pid_t, to: pid_t) -> () {
+    let proc_dir = WalkDir::new("/proc/").into_iter()
+        .filter_entry(|e| is_depth_one(e) && !is_hidden(e))
+        .filter_map(|e| e.ok());
+    for proc_entry in proc_dir {
+        let pid = proc_entry.file_name().to_str().unwrap().parse::<i32>().unwrap_or(-1);
 
-    if dir.is_null() {
-        return;
-    }
+        if unsafe { getpgid(pid) } == from {
+            reptyr_debug!("Change pgid for pid {}", pid);
+            let syscalls = unsafe { &*ptrace_syscall_numbers(child as *mut ptrace_child) };
 
-    let mut d = readdir(dir);
-
-    while !d.is_null() {
-        if (*d).d_name[0] == ('.' as i8) {
-            d = readdir(dir);
-            continue;
-        }
-
-        let pid = strtol((*d).d_name.as_ptr(), &mut p as *mut *mut c_char, 10);
-
-        if p.is_null() || (*p) != 0 {
-            // Noop
-        } else if getpgid(pid as i32) == from {
-            debug(cstr!("Change pgid for pid %d"), pid);
-            let syscalls = &*ptrace_syscall_numbers(child as *mut ptrace_child);
-
-            let err = ptrace_remote_syscall(
-                child,
-                syscalls.nr_setpgid as u64,
-                pid as u64,
-                to as u64,
-                0,
-                0,
-                0,
-                0
-            );
+            let err = unsafe {
+                ptrace_remote_syscall(
+                    child,
+                    syscalls.nr_setpgid as u64,
+                    pid as u64,
+                    to as u64,
+                    0,
+                    0,
+                    0,
+                    0
+                )
+            };
 
             if err < 0 {
-                error(cstr!(" failed: %s"), strerror(-err as i32));
+                reptyr_error!(" failed: {}", -err as i32);
             }
         }
-
-        d = readdir(dir);
     }
-
-    closedir(dir);
 }
 
 #[no_mangle]
