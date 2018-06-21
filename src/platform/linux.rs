@@ -307,7 +307,7 @@ pub extern fn check_proc_stopped(pid: pid_t, _fd: c_int) -> c_int {
         Ok(stat) => stat,
     };
 
-    if st.state == procinfo::pid::State::TraceStopped {
+    if st.state == procinfo::pid::State::Stopped || st.state == procinfo::pid::State::TraceStopped {
         return 1;
     }
 
