@@ -21,6 +21,9 @@ mod macros {
     }
 
     macro_rules! reptyr_error {
+        ($s:expr) => {
+            println!(concat!("[!] ", $s));
+        };
         ($s:expr, $($x:tt)*) => {
             println!(concat!("[!] ", $s), $($x)*);
         };

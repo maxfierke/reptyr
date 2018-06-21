@@ -27,7 +27,6 @@ use libc::{
   c_ulong,
   c_void,
   close,
-  closedir,
   DIR,
   EINVAL,
   ENOMEM,
@@ -185,88 +184,69 @@ pub extern fn check_pgroup(target: pid_t) -> c_int {
 }
 
 #[no_mangle]
-pub unsafe extern fn get_child_tty_fds(child: *mut ptrace_child, _statfd: c_int, count: *mut c_int) -> *mut c_int {
+pub extern fn get_child_tty_fds(child: *mut ptrace_child, _statfd: c_int, count: *mut c_int) -> *mut c_int {
     let mut child_status: proc_stat = Default::default();
-    let mut tty_st: stat = mem::zeroed();
-    let mut console_st: stat = mem::zeroed();
-    let mut st: stat = mem::zeroed();
-    let buf = ['\0' as c_char; PATH_MAX as usize];
     let mut fds: fd_array = Default::default();
+    let pid = unsafe { (*child).pid };
 
     reptyr_debug!("Looking up fds for tty in child.");
 
-    if let Err(err) = read_proc_stat((*child).pid, &mut child_status) {
-        (*child).error = err.raw_os_error().unwrap();
+    if let Err(err) = read_proc_stat(pid, &mut child_status) {
+        unsafe { (*child).error = err.raw_os_error().unwrap(); }
         return 0 as *mut c_int;
     } else {
-        (*child).error = 0;
+        unsafe { (*child).error = 0; }
     }
 
-    debug(cstr!("Resolved child tty: %x"), child_status.ctty);
+    reptyr_debug!("Resolved child tty: {}", child_status.ctty);
 
-    if stat(cstr!("/dev/tty"), &mut tty_st) < 0 {
-        (*child).error = assert_nonzero!(errno().0);
-        error(cstr!("Unable to stat /dev/tty"));
-        return 0 as *mut c_int;
-    }
+    let tty_st = match nix::sys::stat::stat("/dev/tty") {
+        Err(_) => {
+            unsafe { (*child).error = assert_nonzero!(errno().0); };
+            reptyr_error!("Unable to stat /dev/tty");
+            return 0 as *mut c_int;
+        },
+        Ok(st) => st
+    };
 
-    if stat(cstr!("/dev/console"), &mut console_st) < 0 {
-        error(cstr!("Unable to stat /dev/console"));
-        console_st.st_rdev = u64::max_value();
-    }
+    let console_st = match nix::sys::stat::stat("/dev/console") {
+        Err(_) => {
+            reptyr_error!("Unable to stat /dev/console");
+            let mut st: nix::sys::stat::FileStat = unsafe { mem::zeroed() };
+            st.st_rdev = u64::max_value();
+            st
+        },
+        Ok(st) => st
+    };
 
-    snprintf(
-        buf.as_ptr() as *mut i8,
-        PATH_MAX as usize,
-        cstr!("/proc/%d/fd/"),
-        (*child).pid
-    );
+    let proc_dir_path = format!("/proc/{}/fd/", pid);
+    let proc_dir = WalkDir::new(proc_dir_path).into_iter()
+        .filter_entry(|e| is_depth_one(e) && !is_hidden(e))
+        .filter_map(|e| e.ok());
+    for proc_entry in proc_dir {
+        let fd = proc_entry.file_name().to_str().unwrap().parse::<i32>().unwrap_or(-1);
+        let fd_path = proc_entry.path();
 
-
-    let dir: *mut DIR = opendir(buf.as_ptr() as *mut i8);
-
-    if dir.is_null() {
-        assert_nonzero!(errno().0);
-        return 0 as *mut c_int;
-    }
-
-    let mut d = readdir(dir);
-
-    while !d.is_null() {
-        if (*d).d_name[0] == ('.' as i8) {
-            d = readdir(dir);
-            continue;
-        }
-
-        snprintf(
-            buf.as_ptr() as *mut i8,
-            PATH_MAX as usize,
-            cstr!("/proc/%d/fd/%s"),
-            (*child).pid,
-            (*d).d_name
-        );
-
-        if stat(buf.as_ptr(), &mut st) < 0 {
-            d = readdir(dir);
-            continue;
-        }
+        let st = match nix::sys::stat::stat(fd_path) {
+            Err(_) => continue,
+            Ok(fd_stat) => fd_stat
+        };
 
         if st.st_rdev == child_status.ctty ||
            st.st_rdev == tty_st.st_rdev ||
            st.st_rdev == console_st.st_rdev {
-            debug(cstr!("Found an alias for the tty: %s"), &(*d).d_name as *const c_char);
-            if fd_array_push(&mut fds, atoi(&(*d).d_name as *const c_char)) != 0 {
-                (*child).error = assert_nonzero!(errno().0);
-                error(cstr!("Unable to allocate memory for fd array."));
+            reptyr_debug!("Found an alias for the tty: {}", fd);
+            if fd_array_push(&mut fds, fd) != 0 {
+                unsafe {
+                    (*child).error = assert_nonzero!(errno().0);
+                };
+                reptyr_error!("Unable to allocate memory for fd array.");
                 break;
             }
         }
-
-        d = readdir(dir);
     }
 
-    *count = fds.n;
-    closedir(dir);
+    unsafe { *count = fds.n };
     return fds.fds;
 }
 

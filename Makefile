@@ -1,6 +1,6 @@
 override CFLAGS := -Wall -Werror -D_GNU_SOURCE -g $(CFLAGS)
 # TODO: Rust bundles libraries that depend on these
-override LDFLAGS := -lpthread -ldl
+override LDFLAGS := -lpthread -ldl -lrt
 OBJS=reptyr.o attach.o
 REPTYER_RUST_LIB := target/release/libptyr.a
 UNAME_S := $(shell uname -s)
