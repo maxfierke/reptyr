@@ -21,13 +21,11 @@ use platform::{
 };
 use ptrace::ptrace_child;
 use libc::{
-  atoi,
   c_char,
   c_int,
   c_ulong,
   c_void,
   close,
-  DIR,
   EINVAL,
   ENOMEM,
   ENOTTY,
@@ -42,12 +40,9 @@ use libc::{
   O_RDONLY,
   O_RDWR,
   open,
-  opendir,
   PATH_MAX,
   pid_t,
-  readdir,
   snprintf,
-  stat,
   tcgetattr,
   termios,
 };
@@ -319,67 +314,38 @@ pub unsafe extern fn get_terminal_state(steal: *mut steal_pty_state, target: pid
 // steal->master_fds.
 #[no_mangle]
 pub unsafe extern fn find_master_fd(steal: *mut steal_pty_state) -> c_int {
-    let mut st: stat = mem::zeroed();
-    let buf = ['\0' as c_char; PATH_MAX as usize];
-
-    snprintf(
-        buf.as_ptr() as *mut i8,
-        PATH_MAX as usize,
-        cstr!("/proc/%d/fd/"),
-        (*steal).child.pid
-    );
-
-    let dir: *mut DIR = opendir(buf.as_ptr() as *mut i8);
-
-    if dir.is_null() {
-        assert_nonzero!(errno().0);
-        return 0;
-    }
-
-    let mut d = readdir(dir);
-
     // from original source:
     // ptmx(4) and Linux Documentation/devices.txt document
     // /dev/ptmx has having major 5 and minor 2. I can't find any
     // constants in headers after a brief glance that I should be
     // using here.
     let ptmx_device = makedev(5, 2);
+    let pid = (*steal).child.pid;
+    let proc_dir_path = format!("/proc/{}/fd/", pid);
+    let proc_dir = WalkDir::new(proc_dir_path).into_iter()
+        .filter_entry(|e| is_depth_one(e) && !is_hidden(e))
+        .filter_map(|e| e.ok());
+    for proc_entry in proc_dir {
+        let file_name = proc_entry.file_name().to_str().unwrap();
+        let fd = file_name.parse::<i32>().unwrap_or(-1);
+        let fd_path = proc_entry.path();
 
-    while !d.is_null() {
-        if (*d).d_name[0] == ('.' as i8) {
-            d = readdir(dir);
-            continue;
-        }
+        let st = match nix::sys::stat::stat(fd_path) {
+            Err(_) => {
+                reptyr_debug!("Couldn't stat. Skipping to the next FD.");
+                continue;
+            },
+            Ok(fd_stat) => fd_stat
+        };
 
-        debug(cstr!("checking fd to see if it's ptmx: %s"), (*d).d_name.as_ptr());
-
-        snprintf(
-            buf.as_ptr() as *mut i8,
-            PATH_MAX as usize,
-            cstr!("/proc/%d/fd/%s"),
-            (*steal).child.pid,
-            (*d).d_name.as_ptr()
-        );
-
-        if stat(buf.as_ptr(), &mut st) < 0 {
-            reptyr_debug!("Couldn't stat. Skipping to the next FD.");
-            d = readdir(dir);
-            continue;
-        }
-
-        debug(
-            cstr!("Checking fd: %s: st_dev=%x"),
-            (*d).d_name.as_ptr(),
-            st.st_rdev as c_int
-        );
+        reptyr_debug!("Checking fd: {}: st_dev={}", fd, st.st_rdev);
 
         if st.st_rdev != ptmx_device {
             reptyr_debug!("Not a ptmx. Skipping to the next FD.");
-            d = readdir(dir);
             continue;
         }
 
-        debug(cstr!("found a ptmx fd: %s"), (*d).d_name.as_ptr());
+        reptyr_debug!("found a ptmx fd: {}", fd);
 
         let child = &mut (*steal).child;
         let syscalls = &*ptrace_syscall_numbers(child as *mut ptrace_child);
@@ -387,11 +353,10 @@ pub unsafe extern fn find_master_fd(steal: *mut steal_pty_state) -> c_int {
         // TODO: use the ioctls crate or something instead of this magic number
         const TIOCGPTN: u64 = 0x80045430;
 
-        let tty_id = atoi((*d).d_name.as_ptr());
         let mut err = ptrace_remote_syscall(
             child,
             syscalls.nr_ioctl as u64,
-            tty_id as u64,
+            fd as u64,
             TIOCGPTN,
             (*steal).child_scratch,
             0,
@@ -401,7 +366,6 @@ pub unsafe extern fn find_master_fd(steal: *mut steal_pty_state) -> c_int {
 
         if err < 0 {
             reptyr_debug!("Error doing TIOCGPTN: {}", -err as i32);
-            d = readdir(dir);
             continue;
         }
 
@@ -418,19 +382,16 @@ pub unsafe extern fn find_master_fd(steal: *mut steal_pty_state) -> c_int {
 
         if err < 0 {
             reptyr_debug!(" error getting ptn: {}", child.error);
-            d = readdir(dir);
             continue;
         }
 
         if ptn == minor((*steal).target_stat.ctty) as c_int {
-            debug(cstr!("found a master fd: %d"), tty_id);
-            if fd_array_push(&mut (*steal).master_fds, tty_id) != 0 {
-                error(cstr!("unable to allocate memory for fd array!"));
+            reptyr_debug!("found a master fd: {}", fd);
+            if fd_array_push(&mut (*steal).master_fds, fd) != 0 {
+                reptyr_error!("unable to allocate memory for fd array!");
                 return ENOMEM;
             }
         }
-
-        d = readdir(dir);
     }
 
     if (*steal).master_fds.n == 0 {
@@ -517,12 +478,14 @@ pub extern fn move_process_group(child: *mut ptrace_child, from: pid_t, to: pid_
 }
 
 #[no_mangle]
-pub unsafe extern fn copy_user(dest: *mut ptrace_child, src: *mut ptrace_child) -> () {
-    memcpy(
-        &mut (*dest).user as *mut libc::user as *mut c_void,
-        &(*src).user as *const libc::user as *const c_void,
-        mem::size_of::<libc::user>()
-    );
+pub extern fn copy_user(dest: *mut ptrace_child, src: *mut ptrace_child) -> () {
+    unsafe {
+        memcpy(
+            &mut (*dest).user as *mut libc::user as *mut c_void,
+            &(*src).user as *const libc::user as *const c_void,
+            mem::size_of::<libc::user>()
+        );
+    };
 
     ()
 }
