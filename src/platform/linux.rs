@@ -87,8 +87,7 @@ pub extern fn check_ptrace_scope() -> () {
     eprintln!("For more information, see /etc/sysctl.d/10-ptrace.conf");
 }
 
-#[no_mangle]
-pub extern fn read_proc_stat(pid: pid_t, out: &mut proc_stat) -> Result<proc_stat, Error> {
+pub fn read_proc_stat(pid: pid_t, out: &mut proc_stat) -> Result<proc_stat, Error> {
     let process_proc_stat = match procinfo::pid::stat(pid) {
         Err(err) => return Err(err),
         Ok(stat) => stat,
@@ -112,8 +111,7 @@ pub extern fn read_proc_stat(pid: pid_t, out: &mut proc_stat) -> Result<proc_sta
     Ok(*out)
 }
 
-#[no_mangle]
-pub extern fn read_uid(pid: pid_t) -> Result<u32, Error> {
+pub fn read_uid(pid: pid_t) -> Result<u32, Error> {
     let status = match procinfo::pid::status(pid) {
         Err(err) => {
             // FIXME: This doesn't _seem_ right, but it seems to mirror the C
@@ -251,9 +249,10 @@ pub extern fn get_child_tty_fds(child: *mut ptrace_child, _statfd: c_int, count:
 // leader. This is true in most cases, although in principle you can
 // construct situations where it is false. We should fail safe later
 // on if this turns out to be wrong, however.
-#[no_mangle]
-pub extern fn find_terminal_emulator(steal: &mut steal_pty_state) -> Result<&steal_pty_state, Error> {
-    println!("[+] session leader of pid {} = {}",
+pub fn find_terminal_emulator(
+    steal: &mut steal_pty_state
+) -> Result<&steal_pty_state, Error> {
+    reptyr_debug!("[+] session leader of pid {} = {}",
         steal.target_stat.pid,
         steal.target_stat.sid
     );
@@ -263,7 +262,7 @@ pub extern fn find_terminal_emulator(steal: &mut steal_pty_state) -> Result<&ste
         Ok(stat) => stat,
     };
 
-    println!("[+] found terminal emulator process: {}", leader_st.ppid);
+    reptyr_debug!("[+] found terminal emulator process: {}", leader_st.ppid);
 
     steal.emulator_pid = leader_st.ppid;
 
