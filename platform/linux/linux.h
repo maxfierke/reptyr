@@ -57,6 +57,10 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 
+#include "../platform.h"
+#include "../../reptyr.h"
+#include "../../ptrace.h"
+
 struct ptrace_child;
 extern unsigned long ptrace_socketcall(struct ptrace_child *child,
                                 unsigned long scratch,

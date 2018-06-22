@@ -5,7 +5,7 @@ OBJS=reptyr.o attach.o
 REPTYER_RUST_LIB := target/release/libptyr.a
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
-	OBJS += platform/linux/linux_ptrace.o platform/linux/linux.o
+	OBJS += platform/linux/linux_ptrace.o
 endif
 ifeq ($(UNAME_S),FreeBSD)
 	OBJS += platform/freebsd/freebsd_ptrace.o platform/freebsd/freebsd.o
