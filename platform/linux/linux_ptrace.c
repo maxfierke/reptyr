@@ -55,8 +55,7 @@ static long __ptrace_command(struct ptrace_child *child, enum __ptrace_request r
                              void *, void*);
 #endif
 
-#define ptrace_command(cld, req, ...) _ptrace_command(cld, req, ## __VA_ARGS__, NULL, NULL)
-#define _ptrace_command(cld, req, addr, data, ...) __ptrace_command((cld), (req), (void*)(addr), (void*)(data))
+#define ptrace_command(cld, req, addr, data) __ptrace_command((cld), (req), (void*)(addr), (void*)(data))
 
 
 struct ptrace_personality {
@@ -103,7 +102,7 @@ struct syscall_numbers *ptrace_syscall_numbers(struct ptrace_child *child) {
 int ptrace_attach_child(struct ptrace_child *child, pid_t pid) {
     memset(child, 0, sizeof * child);
     child->pid = pid;
-    if (ptrace_command(child, PTRACE_ATTACH) < 0)
+    if (ptrace_command(child, PTRACE_ATTACH, NULL, NULL) < 0)
         return -1;
 
     return ptrace_finish_attach(child, pid);
@@ -262,7 +261,7 @@ long ptrace_remote_syscall(struct ptrace_child *child,
         return -1;
 
     rv = ptrace_command(child, PTRACE_PEEKUSER,
-                        personality(child)->syscall_rv);
+                        personality(child)->syscall_rv, NULL);
     if (child->error)
         return -1;
 
@@ -288,7 +287,7 @@ int ptrace_memcpy_to_child(struct ptrace_child *child, child_addr_t dst, const v
     }
 
     if (n) {
-        scratch = ptrace_command(child, PTRACE_PEEKDATA, dst);
+        scratch = ptrace_command(child, PTRACE_PEEKDATA, dst, NULL);
         if (child->error)
             return -1;
         memcpy(&scratch, src, n);
@@ -303,7 +302,7 @@ int ptrace_memcpy_from_child(struct ptrace_child *child, void *dst, child_addr_t
     unsigned long scratch;
 
     while (n) {
-        scratch = ptrace_command(child, PTRACE_PEEKDATA, src);
+        scratch = ptrace_command(child, PTRACE_PEEKDATA, src, NULL);
         if (child->error) return -1;
         memcpy(dst, &scratch, min(n, sizeof(unsigned long)));
 

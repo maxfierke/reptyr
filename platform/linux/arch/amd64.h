@@ -89,7 +89,7 @@ int arch_get_personality(struct ptrace_child *child) {
     unsigned long cs;
 
     cs = ptrace_command(child, PTRACE_PEEKUSER,
-                        offsetof(struct user, regs.cs));
+                        offsetof(struct user, regs.cs), NULL);
     if (child->error)
         return -1;
     if (cs == 0x23)
