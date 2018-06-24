@@ -9,6 +9,11 @@ use libc::{
   user
 };
 
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub use self::linux::*;
+
 #[repr(C)]
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone)]

@@ -3,15 +3,7 @@ extern crate nix;
 extern crate procinfo;
 extern crate walkdir;
 
-use ptrace::{
-    ptrace_memcpy_from_child,
-    ptrace_memcpy_to_child,
-    ptrace_remote_syscall,
-    ptrace_syscall_numbers
-};
 use errno::errno;
-use error;
-use debug;
 use platform::{
     fd_array,
     fd_array_push,
@@ -19,7 +11,13 @@ use platform::{
     steal_pty_state,
     TASK_COMM_LENGTH
 };
-use ptrace::ptrace_child;
+use ptrace::{
+    ptrace_child,
+    ptrace_memcpy_from_child,
+    ptrace_memcpy_to_child,
+    ptrace_remote_syscall,
+    ptrace_syscall_numbers
+};
 use libc::{
   c_char,
   c_int,
@@ -30,7 +28,6 @@ use libc::{
   ENOMEM,
   ENOTTY,
   ESRCH,
-  getpgid,
   isatty,
   major,
   minor,
@@ -50,6 +47,15 @@ use std::fs::File;
 use std::io::Error;
 use std::io::prelude::*;
 use std::{mem, str};
+use self::nix::Error::Sys;
+use self::nix::sys::stat::{
+    FileStat,
+    stat
+};
+use self::nix::unistd::{
+    getpgid,
+    Pid
+};
 use self::walkdir::{DirEntry, WalkDir};
 
 // From #include <linux/major.h>
@@ -132,44 +138,49 @@ pub extern fn check_pgroup(target: pid_t) -> c_int {
 
     reptyr_debug!("Checking for problematic process group members...");
 
-    let pg: pid_t = unsafe { getpgid(target) };
-    if pg < 0 {
-        reptyr_error!("Unable to get pgid for pid {}", target);
-        return errno().0;
-    }
+    let pg = match getpgid(Some(Pid::from_raw(target))) {
+        Err(Sys(err)) => {
+            reptyr_error!("Unable to get pgid for pid {}", target);
+            return err as c_int;
+        },
+        Err(_) => return -1 as c_int,
+        Ok(pg) => pg
+    };
 
     let proc_dir = WalkDir::new("/proc/").into_iter()
         .filter_entry(|e| is_depth_one(e) && !is_hidden(e))
         .filter_map(|e| e.ok());
     for proc_entry in proc_dir {
-        let pid = proc_entry.file_name().to_str().unwrap().parse::<i32>().unwrap_or(-1);
+        let pid = proc_entry.file_name().to_str().unwrap().parse::<i32>().unwrap_or(-1) as pid_t;
 
-        if pid != target.into() && unsafe { getpgid(pid) } == pg {
-            /*
-             * We are actually being somewhat overly-conservative here
-             * -- if pid is a child of target, and has not yet called
-             * execve(), reptyr's setpgid() strategy may suffice. That
-             * is a fairly rare case, and annoying to check for, so
-             * for now let's just bail out.
-             */
-            if read_proc_stat(pid, &mut pid_stat).is_ok() {
-                unsafe {
-                    memcpy(
-                        pid_stat.comm.as_ptr() as *mut c_void,
-                        cstr!("???") as *mut c_void,
-                        4
-                    );
+        if let Ok(proc_pg) = getpgid(Some(Pid::from_raw(pid))) {
+            if pid != target && proc_pg == pg {
+                /*
+                * We are actually being somewhat overly-conservative here
+                * -- if pid is a child of target, and has not yet called
+                * execve(), reptyr's setpgid() strategy may suffice. That
+                * is a fairly rare case, and annoying to check for, so
+                * for now let's just bail out.
+                */
+                if read_proc_stat(pid, &mut pid_stat).is_ok() {
+                    unsafe {
+                        memcpy(
+                            pid_stat.comm.as_ptr() as *mut c_void,
+                            cstr!("???") as *mut c_void,
+                            4
+                        );
+                    }
                 }
+                reptyr_error!(
+                    "Process {} ({}) shares {}'s process group. Unable to attach.\n(This most commonly means that {} has sub-processes).",
+                    pid as c_int,
+                    str::from_utf8(&pid_stat.comm).unwrap_or("NOCOMM"),
+                    target as c_int,
+                    target as c_int
+                );
+                err = EINVAL;
+                break;
             }
-            reptyr_error!(
-                "Process {} ({}) shares {}'s process group. Unable to attach.\n(This most commonly means that {} has sub-processes).",
-                pid as c_int,
-                str::from_utf8(&pid_stat.comm).unwrap_or("NOCOMM"),
-                target as c_int,
-                target as c_int
-            );
-            err = EINVAL;
-            break;
         }
     }
 
@@ -193,19 +204,21 @@ pub extern fn get_child_tty_fds(child: *mut ptrace_child, _statfd: c_int, count:
 
     reptyr_debug!("Resolved child tty: {}", child_status.ctty);
 
-    let tty_st = match nix::sys::stat::stat("/dev/tty") {
-        Err(_) => {
-            unsafe { (*child).error = assert_nonzero!(errno().0); };
+    let tty_st = match stat("/dev/tty") {
+        Err(err) => {
+            if let Sys(errno) = err {
+                unsafe { (*child).error = assert_nonzero!(errno as i32); };
+            }
             reptyr_error!("Unable to stat /dev/tty");
             return 0 as *mut c_int;
         },
         Ok(st) => st
     };
 
-    let console_st = match nix::sys::stat::stat("/dev/console") {
+    let console_st = match stat("/dev/console") {
         Err(_) => {
             reptyr_error!("Unable to stat /dev/console");
-            let mut st: nix::sys::stat::FileStat = unsafe { mem::zeroed() };
+            let mut st: FileStat = unsafe { mem::zeroed() };
             st.st_rdev = u64::max_value();
             st
         },
@@ -220,7 +233,7 @@ pub extern fn get_child_tty_fds(child: *mut ptrace_child, _statfd: c_int, count:
         let fd = proc_entry.file_name().to_str().unwrap().parse::<i32>().unwrap_or(-1);
         let fd_path = proc_entry.path();
 
-        let st = match nix::sys::stat::stat(fd_path) {
+        let st = match stat(fd_path) {
             Err(_) => continue,
             Ok(fd_stat) => fd_stat
         };
@@ -290,7 +303,7 @@ pub unsafe extern fn get_terminal_state(steal: *mut steal_pty_state, target: pid
     }
 
     if major((*steal).target_stat.ctty) != UNIX98_PTY_SLAVE_MAJOR {
-        error(cstr!("Child is not connected to a pseudo-TTY. Unable to steal TTY."));
+        reptyr_error!("Child is not connected to a pseudo-TTY. Unable to steal TTY.");
         return EINVAL;
     }
 
@@ -329,7 +342,7 @@ pub unsafe extern fn find_master_fd(steal: *mut steal_pty_state) -> c_int {
         let fd = file_name.parse::<i32>().unwrap_or(-1);
         let fd_path = proc_entry.path();
 
-        let st = match nix::sys::stat::stat(fd_path) {
+        let st = match stat(fd_path) {
             Err(_) => {
                 reptyr_debug!("Couldn't stat. Skipping to the next FD.");
                 continue;
@@ -415,7 +428,7 @@ pub unsafe extern fn get_process_tty_termios(pid: pid_t, tio: *mut termios) -> c
         if err != 0 {
             err = 0;
 
-            debug(cstr!("checking fd to see if it's ptmx: %s"), i);
+            reptyr_debug!("checking fd to see if it's ptmx: {}", i);
 
             snprintf(
                 buf.as_ptr() as *mut i8,
@@ -446,31 +459,34 @@ pub unsafe extern fn get_process_tty_termios(pid: pid_t, tio: *mut termios) -> c
 
 #[no_mangle]
 pub extern fn move_process_group(child: *mut ptrace_child, from: pid_t, to: pid_t) -> () {
+    let from_pid = Pid::from_raw(from);
     let proc_dir = WalkDir::new("/proc/").into_iter()
         .filter_entry(|e| is_depth_one(e) && !is_hidden(e))
         .filter_map(|e| e.ok());
     for proc_entry in proc_dir {
         let pid = proc_entry.file_name().to_str().unwrap().parse::<i32>().unwrap_or(-1);
 
-        if unsafe { getpgid(pid) } == from {
-            reptyr_debug!("Change pgid for pid {}", pid);
-            let syscalls = unsafe { &*ptrace_syscall_numbers(child as *mut ptrace_child) };
+        if let Ok(proc_pg) = getpgid(Some(Pid::from_raw(pid))) {
+            if proc_pg == from_pid {
+                reptyr_debug!("Change pgid for pid {}", pid);
+                let syscalls = unsafe { &*ptrace_syscall_numbers(child as *mut ptrace_child) };
 
-            let err = unsafe {
-                ptrace_remote_syscall(
-                    child,
-                    syscalls.nr_setpgid as u64,
-                    pid as u64,
-                    to as u64,
-                    0,
-                    0,
-                    0,
-                    0
-                )
-            };
+                let err = unsafe {
+                    ptrace_remote_syscall(
+                        child,
+                        syscalls.nr_setpgid as u64,
+                        pid as u64,
+                        to as u64,
+                        0,
+                        0,
+                        0,
+                        0
+                    )
+                };
 
-            if err < 0 {
-                reptyr_error!(" failed: {}", -err as i32);
+                if err < 0 {
+                    reptyr_error!(" failed: {}", -err as i32);
+                }
             }
         }
     }
