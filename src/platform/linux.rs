@@ -23,23 +23,14 @@ use libc::{
   c_int,
   c_ulong,
   c_void,
-  close,
   EINVAL,
   ENOMEM,
   ENOTTY,
   ESRCH,
-  isatty,
-  major,
-  minor,
-  makedev,
   memcpy,
   O_NOCTTY,
-  O_RDONLY,
   O_RDWR,
-  open,
-  PATH_MAX,
   pid_t,
-  snprintf,
   tcgetattr,
   termios,
 };
@@ -47,20 +38,31 @@ use std::fs::File;
 use std::io::Error;
 use std::io::prelude::*;
 use std::{mem, str};
+use std::path::PathBuf;
 use self::nix::Error::Sys;
+use self::nix::fcntl::{
+    OFlag,
+    open,
+};
 use self::nix::sys::stat::{
+    makedev,
+    major,
+    minor,
     FileStat,
+    Mode,
     stat
 };
 use self::nix::unistd::{
+    close,
     getpgid,
+    isatty,
     Pid
 };
 use self::walkdir::{DirEntry, WalkDir};
 
 // From #include <linux/major.h>
 // Defined as UNIX98_PTY_MASTER_MAJOR + UNIX98_PTY_MAJOR_COUNT
-const UNIX98_PTY_SLAVE_MAJOR: u32 = 128 + 8;
+const UNIX98_PTY_SLAVE_MAJOR: u64 = 128 + 8;
 
 fn is_hidden(entry: &DirEntry) -> bool {
     entry.file_name()
@@ -416,13 +418,12 @@ pub unsafe extern fn find_master_fd(steal: *mut steal_pty_state) -> c_int {
 /* Homebrew posix_openpt() */
 #[no_mangle]
 pub unsafe extern fn get_pt() -> c_int {
-    open(cstr!("/dev/ptmx"), O_RDWR | O_NOCTTY)
+    libc::open(cstr!("/dev/ptmx"), O_RDWR | O_NOCTTY)
 }
 
 #[no_mangle]
-pub unsafe extern fn get_process_tty_termios(pid: pid_t, tio: *mut termios) -> c_int {
+pub extern fn get_process_tty_termios(pid: pid_t, tio: *mut termios) -> c_int {
     let mut err = EINVAL;
-    let buf = ['\0' as c_char; PATH_MAX as usize];
 
     for i in 0..3 {
         if err != 0 {
@@ -430,27 +431,25 @@ pub unsafe extern fn get_process_tty_termios(pid: pid_t, tio: *mut termios) -> c
 
             reptyr_debug!("checking fd to see if it's ptmx: {}", i);
 
-            snprintf(
-                buf.as_ptr() as *mut i8,
-                PATH_MAX as usize,
-                cstr!("/proc/%d/fd/%d"),
-                pid,
-                i
-            );
+            let fd_path = PathBuf::from(format!("/proc/{}/fd/{}", pid, i));
+            let fd = match open(&fd_path, OFlag::O_RDONLY, Mode::empty()) {
+                Err(Sys(fderr)) => {
+                    err = -(fderr as i32);
+                    continue;
+                },
+                Err(_) => { err = 1; continue; },
+                Ok(descriptor) => descriptor
+            };
 
-            let fd = open(buf.as_ptr(), O_RDONLY);
-
-            if fd < 0 {
-                err = -fd;
-            } else if isatty(fd) == 0 {
+            if let Err(_) = isatty(fd) {
                 err = ENOTTY;
-                close(fd);
+                close(fd).unwrap();
                 break;
-            } else if tcgetattr(fd, tio) < 0 {
+            } else if unsafe { tcgetattr(fd, tio) } < 0 {
                 err = -assert_nonzero!(errno().0);
             }
 
-            close(fd);
+            close(fd).unwrap();
         }
     }
 
