@@ -26,21 +26,21 @@ will hopefully speed up once the Linux platform stuff is squared away.
 
 ## Plans?
 
-1. Port over base Linux platform stuff (linux.c)
-2. Port over Linux ptrace stuff (linux_ptrace.c)
-3. Port over Linux arch stuff (if possible)
-4. Port over main reptyr code (reptyr.c, attach.c)
-5. Refactor existing Rust code to be as ideomatic as practical
-6. ???
-12. Tackle other platforms
-13. Tackle macOS
-14. Delete any remaining C code
+1. [X] Port over base Linux platform stuff (linux.c)
+2. [ ] Port over Linux ptrace stuff (linux_ptrace.c)
+3. [ ] Port over Linux arch stuff (if possible)
+4. [ ] Port over main reptyr code (reptyr.c, attach.c)
+5. [ ] Refactor existing Rust code to be as ideomatic as practical
+6. [ ] ???
+12. [ ] Tackle other platforms/archs (ARM, freebsd, x86-32)
+13. [ ] Tackle macOS
+14. [ ] Delete any remaining C code
 
 ### Open Questions
 
 1. Retain 32-bit x86 support? (Leaning no. Probably not worth the effort.)
 2. Retain ARM support? (Would like to, but not sure if I have any spare hardware.)
-3. Keep FreeBSD support? (Probably will. A few things to share with macOS.)
+3. Keep FreeBSD support? (Probably will. Possibly a few things to share with macOS.)
 
 ## Can I help?
 
