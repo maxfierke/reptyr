@@ -32,13 +32,13 @@ use self::nix::unistd::{
 
 #[no_mangle]
 #[allow(deprecated)]
-pub unsafe extern fn __ptrace_command(
+pub extern fn __ptrace_command(
   child: *mut ptrace_child,
   req: Request,
   addr: *mut c_void,
   data: *mut c_void
 ) -> c_long {
-  let pid = Pid::from_raw((*child).pid);
+  let pid = Pid::from_raw(unsafe { (*child).pid });
 
   let ptrace_result = match req {
     Request::PTRACE_ATTACH => attach(pid).map(|_| 0),
@@ -58,17 +58,17 @@ pub unsafe extern fn __ptrace_command(
     },
     Request::PTRACE_SYSCALL => syscall(pid).map(|_| 0),
     Request::PTRACE_TRACEME => traceme().map(|_| 0),
-    _ => ptrace(req, pid, addr, data)
+    _ => unsafe { ptrace(req, pid, addr, data) }
   };
 
 
   match ptrace_result {
     Err(Sys(errno)) => {
-      (*child).error = errno as i32;
+      unsafe { (*child).error = errno as i32; }
       -1
     },
     Err(_) => {
-      (*child).error = 0;
+      unsafe { (*child).error = 0; }
        -1
     },
     Ok(ret) => ret
