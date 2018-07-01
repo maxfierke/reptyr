@@ -2,11 +2,15 @@ extern crate libc;
 extern crate nix;
 
 use libc::{
+  c_int,
   c_long,
-  c_void
+  c_void,
+  pid_t
 };
 use ptrace::{
-  ptrace_child
+  child_state,
+  ptrace_child,
+  ptrace_finish_attach
 };
 use self::nix::Error::{
   Sys
@@ -25,10 +29,41 @@ use self::nix::sys::ptrace::{
   syscall,
   traceme
 };
-use self::nix::sys::signal::Signal;
+use self::nix::sys::signal::{
+  Signal
+};
 use self::nix::unistd::{
     Pid
 };
+use std::mem;
+use std::ptr;
+
+#[no_mangle]
+pub extern fn ptrace_attach_child(child: *mut ptrace_child, pid: pid_t) -> c_int {
+  unsafe {
+    (*child) = mem::zeroed();
+    (*child).pid = pid;
+  }
+
+  if __ptrace_command(child, Request::PTRACE_ATTACH, ptr::null_mut(), ptr::null_mut()) < 0 {
+    return -1;
+  }
+
+  unsafe { ptrace_finish_attach(child, pid) }
+}
+
+#[no_mangle]
+pub extern fn ptrace_detach_child(child: *mut ptrace_child) -> c_int {
+  if __ptrace_command(child, Request::PTRACE_DETACH, ptr::null_mut(), ptr::null_mut()) < 0 {
+    return -1;
+  }
+
+  unsafe {
+    (*child).state = child_state::ptrace_detached;
+  };
+
+  0
+}
 
 #[no_mangle]
 #[allow(deprecated)]

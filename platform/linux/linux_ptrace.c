@@ -93,15 +93,6 @@ struct syscall_numbers *ptrace_syscall_numbers(struct ptrace_child *child) {
     return &arch_syscall_numbers[child->personality];
 }
 
-int ptrace_attach_child(struct ptrace_child *child, pid_t pid) {
-    memset(child, 0, sizeof * child);
-    child->pid = pid;
-    if (ptrace_command(child, PTRACE_ATTACH, NULL, NULL) < 0)
-        return -1;
-
-    return ptrace_finish_attach(child, pid);
-}
-
 int ptrace_finish_attach(struct ptrace_child *child, pid_t pid) {
     memset(child, 0, sizeof * child);
     child->pid = pid;
@@ -123,13 +114,6 @@ detach:
     /* Don't clobber child->error */
     ptrace(PTRACE_DETACH, child->pid, 0, 0);
     return -1;
-}
-
-int ptrace_detach_child(struct ptrace_child *child) {
-    if (ptrace_command(child, PTRACE_DETACH, 0, 0) < 0)
-        return -1;
-    child->state = ptrace_detached;
-    return 0;
 }
 
 int ptrace_wait(struct ptrace_child *child) {

@@ -64,6 +64,7 @@ pub struct syscall_numbers {
 }
 
 extern {
+    pub fn ptrace_finish_attach(child: *mut ptrace_child, pid: pid_t) -> c_int;
     pub fn ptrace_remote_syscall(
         child: *mut ptrace_child,
         sysno: c_ulong,
